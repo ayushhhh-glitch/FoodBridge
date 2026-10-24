@@ -1,0 +1,6 @@
+{
+  "name": "FoodBridge — Community Food Donation Matcher",
+  "description": "Connect surplus food donors with registered NGOs and community kitchens through smart matching, pickup scheduling, expiry tracking, and live inventory management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
