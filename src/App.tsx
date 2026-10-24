@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Utensils,
   Building2,
@@ -15,15 +15,22 @@ import {
   BarChart3,
   Globe,
   RotateCcw,
+  ShieldCheck,
+  Database,
 } from 'lucide-react';
 import {
   type DonationFormInput,
   type DonationStatus,
+  type DonorVerificationProfile,
   type FoodDonation,
   type NGOProfile,
+  type FirestoreDonationDoc,
+  type FirestoreReservationDoc,
+  type FirestorePickupScheduleDoc,
   PUNE_NEIGHBORHOOD_COORDS,
   advanceDonationStatus,
   getRankedNgoMatches,
+  hydrateDonationsFromFirestore,
   reserveDonationQuantity,
   scheduleDonationPickup,
 } from './utils/matchingEngine';
@@ -36,9 +43,43 @@ import {
   ImpactDashboardView,
   InventoryDashboardView,
 } from './components/InventoryAndImpactView';
+import {
+  auth,
+  onAuthStateChanged,
+  fetchUserProfile,
+  createOrEnsureUserProfile,
+  updateUserVerificationInFirestore,
+  testFirestoreConnection,
+  createDonationInFirestore,
+  ensureDonationExistsInFirestore,
+  reserveDonationWithTransaction,
+  schedulePickupWithTransaction,
+  collectDonationWithTransaction,
+  subscribeToLiveFoodBridgeCollections,
+  FIREBASE_PROJECT_ID,
+  type FirebaseUser,
+  type FoodBridgeUserProfile,
+  type ConnectionCheckResult,
+} from './firebase';
+import { FirebaseAuthModal } from './components/FirebaseAuthModal';
 
-const STORAGE_KEY_DONATIONS = 'foodbridge_pune_donations_v1';
-const STORAGE_KEY_NGOS = 'foodbridge_pune_ngos_v1';
+const STORAGE_KEY_DONATIONS = 'foodbridge_delhi_ncr_donations_v3';
+const STORAGE_KEY_NGOS = 'foodbridge_delhi_ncr_ngos_v3';
+const STORAGE_KEY_VERIFICATION = 'foodbridge_delhi_verification_v3';
+
+const DEFAULT_DONOR_VERIFICATION: DonorVerificationProfile = {
+  organizationCategory: 'Institutional',
+  documentType: 'Authorized College / Hostel ID',
+  documentNumber: 'INST-DU-DELHI-2026-8841',
+  documentFileName: 'du_central_hostel_compliance_certificate.pdf',
+  documentPreviewUrl: '',
+  verificationStatus: 'verified',
+  contactPerson: 'Prof. Arvind Sharma',
+  contactPhone: '+91 98110 44210',
+  contactEmail: 'arvind.sharma@du-hostel.edu.in',
+  pickupGateAddress: 'Gate 2 Mess Loading Bay, Chhatra Marg, University Enclave, Delhi 110007',
+  updatedAtISO: new Date().toISOString(),
+};
 
 export type WorkspaceTab =
   | 'donor-dashboard'
@@ -59,6 +100,81 @@ export default function App() {
   const [role, setRole] = useState<'donor' | 'ngo'>('donor');
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('donor-dashboard');
 
+  // Firebase Auth & Connection Verification State
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<FoodBridgeUserProfile | null>(null);
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionCheckResult | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  // Data Source Mode: 'firestore' (live onSnapshot + runTransaction when signed in) vs 'demo' (localStorage fallback)
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
+
+  // Live Firestore Collection Snapshots (Step 2)
+  const [liveDonationDocs, setLiveDonationDocs] = useState<FirestoreDonationDoc[]>([]);
+  const [liveReservationDocs, setLiveReservationDocs] = useState<FirestoreReservationDoc[]>([]);
+  const [liveScheduleDocs, setLiveScheduleDocs] = useState<FirestorePickupScheduleDoc[]>([]);
+  const [firestoreSyncError, setFirestoreSyncError] = useState<string | null>(null);
+
+  const runFirestorePing = async () => {
+    const res = await testFirestoreConnection();
+    setConnectionStatus(res);
+  };
+
+  useEffect(() => {
+    runFirestorePing();
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      if (user) {
+        setIsDemoMode(false);
+        try {
+          let profile = await fetchUserProfile(user.uid);
+          if (!profile) {
+            profile = await createOrEnsureUserProfile({
+              uid: user.uid,
+              email: user.email || 'partner@foodbridge.org',
+              displayName:
+                user.displayName || user.email?.split('@')[0] || 'FoodBridge Partner',
+              organizationName: 'Delhi NCR Community Partner',
+              accountRole: 'donor',
+              area: 'Connaught Place, Central Delhi',
+            });
+          }
+          setUserProfile(profile);
+          if (profile?.accountRole) {
+            setRole(profile.accountRole);
+          }
+        } catch {
+          // Profile can be completed in modal if needed
+        }
+      } else {
+        setUserProfile(null);
+        setIsDemoMode(true);
+        setLiveDonationDocs([]);
+        setLiveReservationDocs([]);
+        setLiveScheduleDocs([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Step 2: Real-Time onSnapshot Listeners for donations, reservations, and pickupSchedules
+  useEffect(() => {
+    if (!firebaseUser) return;
+    setFirestoreSyncError(null);
+    const unsubscribeSnapshots = subscribeToLiveFoodBridgeCollections(
+      firebaseUser.uid,
+      (payload) => {
+        setLiveDonationDocs(payload.donations);
+        setLiveReservationDocs(payload.reservations);
+        setLiveScheduleDocs(payload.schedules);
+      }
+    );
+    return () => {
+      unsubscribeSnapshots();
+    };
+  }, [firebaseUser]);
+
   const [ngos, setNgos] = useState<NGOProfile[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_NGOS);
@@ -72,7 +188,59 @@ export default function App() {
     return createPuneNgos();
   });
 
-  const [donations, setDonations] = useState<FoodDonation[]>(() => {
+  const [donorVerificationProfile, setDonorVerificationProfile] =
+    useState<DonorVerificationProfile>(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_VERIFICATION);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.verificationStatus) return parsed;
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return DEFAULT_DONOR_VERIFICATION;
+    });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY_VERIFICATION,
+        JSON.stringify(donorVerificationProfile)
+      );
+    } catch {
+      // ignore quota errors
+    }
+  }, [donorVerificationProfile]);
+
+  const handleUpdateDonorVerification = (updated: DonorVerificationProfile) => {
+    setDonorVerificationProfile(updated);
+    // Mirror verification status & contact details onto active donor batches
+    setLocalDonations((prev) =>
+      prev.map((d) => ({
+        ...d,
+        donorVerificationStatus: updated.verificationStatus,
+        donorOrganizationCategory: updated.organizationCategory,
+        donorDocumentType: updated.documentType,
+        donorDocumentNumber: updated.documentNumber,
+        donorPhone: updated.contactPhone,
+        donorEmail: updated.contactEmail,
+        pickupGateAddress: updated.pickupGateAddress,
+      }))
+    );
+
+    if (firebaseUser) {
+      updateUserVerificationInFirestore(firebaseUser.uid, updated).catch((err) => {
+        setFirestoreSyncError(
+          err instanceof Error
+            ? err.message
+            : 'Could not sync verification profile to Firestore.'
+        );
+      });
+    }
+  };
+
+  const [localDonations, setLocalDonations] = useState<FoodDonation[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_DONATIONS);
       if (saved) {
@@ -85,6 +253,29 @@ export default function App() {
     return createPuneSampleDonations(Date.now());
   });
 
+  // Hydrate Firestore snapshots into FoodDonation objects and merge with /users/{donorId} profile & fallback catalog
+  const hydratedFirestoreDonations = useMemo(() => {
+    return hydrateDonationsFromFirestore(
+      liveDonationDocs,
+      liveReservationDocs,
+      liveScheduleDocs,
+      ngos,
+      Date.now(),
+      userProfile
+    );
+  }, [liveDonationDocs, liveReservationDocs, liveScheduleDocs, ngos, userProfile]);
+
+  const donations = useMemo(() => {
+    if (isDemoMode || !firebaseUser) {
+      return localDonations;
+    }
+    // In Live Firestore Mode: live Firestore documents take precedence by ID,
+    // followed by any remaining Pune seed batches so the map/charts remain rich.
+    const liveIds = new Set(hydratedFirestoreDonations.map((d) => d.id));
+    const remainingLocal = localDonations.filter((d) => !liveIds.has(d.id));
+    return [...hydratedFirestoreDonations, ...remainingLocal];
+  }, [isDemoMode, firebaseUser, hydratedFirestoreDonations, localDonations]);
+
   const [selectedDonationId, setSelectedDonationId] = useState<string>(
     () => donations[0]?.id || 'don-pune-101'
   );
@@ -92,14 +283,14 @@ export default function App() {
     () => ngos[0]?.id || 'ngo-pune-1'
   );
 
-  // Persist to localStorage
+  // Persist localDonations to localStorage & listen for cross-tab storage events
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_DONATIONS, JSON.stringify(donations));
+      localStorage.setItem(STORAGE_KEY_DONATIONS, JSON.stringify(localDonations));
     } catch {
       // ignore quota errors
     }
-  }, [donations]);
+  }, [localDonations]);
 
   useEffect(() => {
     try {
@@ -109,6 +300,21 @@ export default function App() {
     }
   }, [ngos]);
 
+  useEffect(() => {
+    const onStorageSync = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_DONATIONS && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setLocalDonations(parsed);
+        } catch {
+          // ignore parse error
+        }
+      }
+    };
+    window.addEventListener('storage', onStorageSync);
+    return () => window.removeEventListener('storage', onStorageSync);
+  }, []);
+
   // Live ticker every 30s to refresh countdown timers
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -116,8 +322,19 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleEnterApp = (targetRole: 'donor' | 'ngo', targetTab?: string) => {
+  const handleEnterApp = (
+    targetRole: 'donor' | 'ngo',
+    targetTab?: string,
+    donationId?: string,
+    ngoId?: string
+  ) => {
     setRole(targetRole);
+    if (donationId) {
+      setSelectedDonationId(donationId);
+    }
+    if (ngoId) {
+      setActiveNgoId(ngoId);
+    }
     if (targetTab) {
       setActiveTab(targetTab as WorkspaceTab);
     } else {
@@ -136,7 +353,7 @@ export default function App() {
     const freshNgos = createPuneNgos();
     const freshDonations = createPuneSampleDonations(Date.now());
     setNgos(freshNgos);
-    setDonations(freshDonations);
+    setLocalDonations(freshDonations);
     setSelectedDonationId(freshDonations[0].id);
     setActiveNgoId(freshNgos[0].id);
     localStorage.setItem(STORAGE_KEY_NGOS, JSON.stringify(freshNgos));
@@ -145,13 +362,14 @@ export default function App() {
 
   const handleCreateDonation = (input: DonationFormInput): FoodDonation => {
     const nowMs = Date.now();
+    const donationId = `don_pune_${nowMs}`;
     const coords = PUNE_NEIGHBORHOOD_COORDS[input.locationArea] || {
-      lat: 18.5204,
-      lng: 73.8567,
+      lat: 28.6139,
+      lng: 77.2090,
     };
 
     const newDonation: FoodDonation = {
-      id: `don-pune-${nowMs}`,
+      id: donationId,
       donorName: input.donorName,
       organizationName: input.organizationName,
       donorType: input.donorType || 'Hostel / Canteen',
@@ -173,6 +391,14 @@ export default function App() {
       status: 'Matched',
       imageUrl: input.imageUrl,
       notes: input.notes,
+      donorVerificationStatus: donorVerificationProfile.verificationStatus,
+      donorOrganizationCategory: donorVerificationProfile.organizationCategory,
+      donorDocumentType: donorVerificationProfile.documentType,
+      donorDocumentNumber: donorVerificationProfile.documentNumber,
+      donorPhone: donorVerificationProfile.contactPhone,
+      donorEmail: donorVerificationProfile.contactEmail,
+      pickupGateAddress:
+        input.address || donorVerificationProfile.pickupGateAddress || input.locationArea,
       isDemoData: false,
       reservations: [],
       statusHistory: [
@@ -185,7 +411,6 @@ export default function App() {
       ],
     };
 
-    // Auto-identify top NGO match
     const topMatch = getRankedNgoMatches(newDonation, ngos, nowMs).find(
       (m) => m.eligible
     );
@@ -200,8 +425,23 @@ export default function App() {
       });
     }
 
-    setDonations((prev) => [newDonation, ...prev]);
+    setLocalDonations((prev) => [newDonation, ...prev]);
     setSelectedDonationId(newDonation.id);
+
+    // Step 2: Persist to Cloud Firestore /donations/{donationId} when Live Firestore mode is active
+    if (!isDemoMode && firebaseUser) {
+      createDonationInFirestore(
+        input,
+        firebaseUser.uid,
+        donationId,
+        donorVerificationProfile
+      ).catch((err) => {
+        setFirestoreSyncError(
+          err instanceof Error ? err.message : 'Failed to write donation to Firestore.'
+        );
+      });
+    }
+
     return newDonation;
   };
 
@@ -226,7 +466,7 @@ export default function App() {
       return { success: false, error: result.error };
     }
 
-    setDonations((prev) =>
+    setLocalDonations((prev) =>
       prev.map((d) => (d.id === donationId ? result.updatedDonation! : d))
     );
     setNgos((prev) =>
@@ -236,6 +476,47 @@ export default function App() {
           : n
       )
     );
+
+    // Step 2: Execute Atomic Firestore Transaction (runTransaction) on donations & reservations
+    if (!isDemoMode && firebaseUser) {
+      (async () => {
+        try {
+          await ensureDonationExistsInFirestore({
+            id: targetDonation.id,
+            donorUid: firebaseUser.uid,
+            donorName: targetDonation.donorName,
+            organizationName: targetDonation.organizationName,
+            foodName: targetDonation.foodName,
+            category: targetDonation.category,
+            originalQuantity: targetDonation.originalQuantity,
+            storageCondition: targetDonation.storageCondition,
+            locationArea: targetDonation.locationArea,
+            expiryTimeISO: targetDonation.expiryTimeISO,
+            pickupWindowStartISO: targetDonation.pickupWindowStartISO,
+            pickupWindowEndISO: targetDonation.pickupWindowEndISO,
+            donorPhone: targetDonation.donorPhone,
+            donorEmail: targetDonation.donorEmail,
+            pickupGateAddress: targetDonation.pickupGateAddress || targetDonation.address,
+            donorVerificationStatus: targetDonation.donorVerificationStatus,
+            donorOrganizationCategory: targetDonation.donorOrganizationCategory,
+            donorDocumentType: targetDonation.donorDocumentType,
+          });
+          await reserveDonationWithTransaction({
+            donationId: targetDonation.id,
+            ngoUid: firebaseUser.uid,
+            ngoName: userProfile?.organizationName || targetNgo.name,
+            mealsToReserve: meals,
+          });
+        } catch (err) {
+          setFirestoreSyncError(
+            err instanceof Error
+              ? err.message
+              : 'Firestore reservation transaction failed.'
+          );
+        }
+      })();
+    }
+
     return { success: true };
   };
 
@@ -259,9 +540,52 @@ export default function App() {
       return { success: false, error: result.error };
     }
 
-    setDonations((prev) =>
+    setLocalDonations((prev) =>
       prev.map((d) => (d.id === donationId ? result.updatedDonation! : d))
     );
+
+    // Step 2: Persist scheduled pickup to /pickupSchedules via atomic transaction
+    if (!isDemoMode && firebaseUser) {
+      const existingRes = liveReservationDocs.find((r) => r.donationId === donationId);
+      (async () => {
+        try {
+          await ensureDonationExistsInFirestore({
+            id: targetDonation.id,
+            donorUid: firebaseUser.uid,
+            donorName: targetDonation.donorName,
+            organizationName: targetDonation.organizationName,
+            foodName: targetDonation.foodName,
+            category: targetDonation.category,
+            originalQuantity: targetDonation.originalQuantity,
+            storageCondition: targetDonation.storageCondition,
+            locationArea: targetDonation.locationArea,
+            expiryTimeISO: targetDonation.expiryTimeISO,
+            pickupWindowStartISO: targetDonation.pickupWindowStartISO,
+            pickupWindowEndISO: targetDonation.pickupWindowEndISO,
+            donorPhone: targetDonation.donorPhone,
+            donorEmail: targetDonation.donorEmail,
+            pickupGateAddress: targetDonation.pickupGateAddress || targetDonation.address,
+            donorVerificationStatus: targetDonation.donorVerificationStatus,
+            donorOrganizationCategory: targetDonation.donorOrganizationCategory,
+            donorDocumentType: targetDonation.donorDocumentType,
+          });
+          await schedulePickupWithTransaction({
+            donationId: targetDonation.id,
+            existingReservationId: existingRes?.id,
+            ngoUid: firebaseUser.uid,
+            ngoName: userProfile?.organizationName || ngoName,
+            pickupTimeISO: pickupISO,
+          });
+        } catch (err) {
+          setFirestoreSyncError(
+            err instanceof Error
+              ? err.message
+              : 'Firestore pickup schedule transaction failed.'
+          );
+        }
+      })();
+    }
+
     return { success: true };
   };
 
@@ -285,9 +609,52 @@ export default function App() {
       return { success: false, error: result.error };
     }
 
-    setDonations((prev) =>
+    setLocalDonations((prev) =>
       prev.map((d) => (d.id === donationId ? result.updatedDonation! : d))
     );
+
+    // Step 2: Confirm food collection & status transition via atomic Firestore transaction
+    if (!isDemoMode && firebaseUser) {
+      const existingRes = liveReservationDocs.find((r) => r.donationId === donationId);
+      const existingSched = liveScheduleDocs.find((s) => s.donationId === donationId);
+      (async () => {
+        try {
+          await ensureDonationExistsInFirestore({
+            id: targetDonation.id,
+            donorUid: firebaseUser.uid,
+            donorName: targetDonation.donorName,
+            organizationName: targetDonation.organizationName,
+            foodName: targetDonation.foodName,
+            category: targetDonation.category,
+            originalQuantity: targetDonation.originalQuantity,
+            storageCondition: targetDonation.storageCondition,
+            locationArea: targetDonation.locationArea,
+            expiryTimeISO: targetDonation.expiryTimeISO,
+            pickupWindowStartISO: targetDonation.pickupWindowStartISO,
+            pickupWindowEndISO: targetDonation.pickupWindowEndISO,
+            donorPhone: targetDonation.donorPhone,
+            donorEmail: targetDonation.donorEmail,
+            pickupGateAddress: targetDonation.pickupGateAddress || targetDonation.address,
+            donorVerificationStatus: targetDonation.donorVerificationStatus,
+            donorOrganizationCategory: targetDonation.donorOrganizationCategory,
+            donorDocumentType: targetDonation.donorDocumentType,
+          });
+          await collectDonationWithTransaction({
+            donationId: targetDonation.id,
+            reservationId: existingRes?.id,
+            scheduleId: existingSched?.id,
+            targetStatus: nextStatus,
+          });
+        } catch (err) {
+          setFirestoreSyncError(
+            err instanceof Error
+              ? err.message
+              : 'Firestore collection transaction failed.'
+          );
+        }
+      })();
+    }
+
     return { success: true };
   };
 
@@ -332,15 +699,15 @@ export default function App() {
                 FoodBridge
               </span>
               <span className="text-[11px] text-emerald-300 block">
-                Pune Redistribution Platform
+                Delhi NCR Redistribution Platform
               </span>
             </button>
           </div>
 
-          {/* Demo Role Switcher */}
-          <div className="my-5 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800">
+          {/* Role Switcher */}
+          <div className="mt-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800">
             <div className="text-[11px] font-semibold text-emerald-300 mb-2">
-              Demo Mode Role Switcher
+              Workspace Role Switcher
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -364,6 +731,46 @@ export default function App() {
                 }`}
               >
                 NGO Mode
+              </button>
+            </div>
+          </div>
+
+          {/* Step 2: Live Firestore vs Demo Mode Fallback Toggle */}
+          <div className="my-3 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-300 mb-2">
+              <span>Data Source Mode</span>
+              <span className="font-mono text-[10px] text-emerald-400">
+                {!isDemoMode && firebaseUser ? 'LIVE SYNC' : 'FALLBACK'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!firebaseUser) {
+                    setIsAuthModalOpen(true);
+                  } else {
+                    setIsDemoMode(false);
+                  }
+                }}
+                className={`py-1.5 px-2 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer ${
+                  !isDemoMode && firebaseUser
+                    ? 'bg-[#10B981] text-white'
+                    : 'text-emerald-200 hover:bg-emerald-900/60'
+                }`}
+              >
+                Live Firestore
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsDemoMode(true)}
+                className={`py-1.5 px-2 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer ${
+                  isDemoMode || !firebaseUser
+                    ? 'bg-[#10B981] text-white'
+                    : 'text-emerald-200 hover:bg-emerald-900/60'
+                }`}
+              >
+                Demo Mode
               </button>
             </div>
           </div>
@@ -408,7 +815,7 @@ export default function App() {
             className="w-full flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-medium text-emerald-300 hover:text-white transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset Pune Demo Data</span>
+            <span>Reset Delhi NCR Demo Data</span>
           </button>
         </div>
       </aside>
@@ -426,12 +833,32 @@ export default function App() {
               {navItems.find((n) => n.id === activeTab)?.label}
             </span>
             <span className="hidden md:inline text-slate-400">·</span>
-            <span className="hidden md:inline text-xs text-slate-500">
-              Pune, Maharashtra (Demo Mode)
+            <span
+              data-testid="workspace-data-mode-indicator"
+              className="hidden md:inline-flex items-center gap-1.5 text-xs text-slate-600"
+            >
+              <Database className="w-3.5 h-3.5 text-[#10B981]" />
+              {!isDemoMode && firebaseUser
+                ? `Live Firestore Sync (${hydratedFirestoreDonations.length} cloud batches)`
+                : 'Delhi NCR (Demo Mode)'}
             </span>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsAuthModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#064E3B] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-[#10B981]" />
+              <span>
+                {firebaseUser
+                  ? `${userProfile?.displayName || firebaseUser.email} (${
+                      userProfile?.accountRole?.toUpperCase() || role.toUpperCase()
+                    })`
+                  : `Firebase Auth (${FIREBASE_PROJECT_ID})`}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => setActiveTab('create-donation')}
@@ -442,12 +869,28 @@ export default function App() {
           </div>
         </header>
 
+        {firestoreSyncError && (
+          <div className="mx-6 mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+            <span>Firestore Sync Notice: {firestoreSyncError}</span>
+            <button
+              type="button"
+              onClick={() => setFirestoreSyncError(null)}
+              className="font-semibold underline ml-4 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Viewport Container */}
         <main className="flex-1 p-6 sm:p-8 max-w-7xl w-full mx-auto">
           {activeTab === 'donor-dashboard' && (
             <DonorDashboardView
               donations={donations}
               ngos={ngos}
+              donorVerificationProfile={donorVerificationProfile}
+              onUpdateDonorVerification={handleUpdateDonorVerification}
+              isDemoMode={isDemoMode || !firebaseUser}
               onNavigateTab={(tab, donId) => {
                 if (donId) setSelectedDonationId(donId);
                 setActiveTab(tab as WorkspaceTab);
@@ -461,6 +904,7 @@ export default function App() {
               donations={donations}
               ngos={ngos}
               activeNgoId={activeNgoId}
+              donorVerificationProfile={donorVerificationProfile}
               onSelectNgo={setActiveNgoId}
               onReserveMeals={handleReserveMeals}
               onSchedulePickup={handleSchedulePickup}
@@ -491,6 +935,7 @@ export default function App() {
               selectedDonationId={selectedDonationId}
               activeNgoId={activeNgoId}
               role={role}
+              donorVerificationProfile={donorVerificationProfile}
               viewMode={activeTab}
               onSelectDonation={setSelectedDonationId}
               onSelectNgo={setActiveNgoId}
@@ -515,6 +960,23 @@ export default function App() {
           )}
         </main>
       </div>
+
+      <FirebaseAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={firebaseUser}
+        userProfile={userProfile}
+        connectionStatus={connectionStatus}
+        onProfileLoaded={(profile) => {
+          setUserProfile(profile);
+          setIsDemoMode(false);
+          if (profile?.accountRole) {
+            setRole(profile.accountRole);
+          }
+        }}
+        onRetestConnection={runFirestorePing}
+      />
     </div>
   );
 }
+

@@ -1,0 +1,462 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated FoodBridge user account (Donor or NGO representative) with isolated PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID matching document ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address (PII restricted to owner).",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full name of donor or NGO coordinator.",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "organizationName": {
+          "type": "string",
+          "description": "Registered restaurant, hostel, or NGO name.",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "accountRole": {
+          "type": "string",
+          "description": "Account type selected at registration (donor or ngo).",
+          "enum": ["donor", "ngo"],
+          "maxLength": 16
+        },
+        "phone": {
+          "type": "string",
+          "description": "Contact phone number (PII restricted to owner).",
+          "minLength": 5,
+          "maxLength": 30
+        },
+        "area": {
+          "type": "string",
+          "description": "Pune neighborhood or operating sector.",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "organizationCategory": {
+          "type": "string",
+          "description": "Donor organization category (Commercial, Institutional, or Individual).",
+          "enum": ["Commercial", "Institutional", "Individual"],
+          "maxLength": 24
+        },
+        "verificationStatus": {
+          "type": "string",
+          "description": "Official document verification status.",
+          "enum": ["unverified", "pending_verification", "verified"],
+          "maxLength": 32
+        },
+        "documentType": {
+          "type": "string",
+          "description": "Required verification document type.",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "documentNumber": {
+          "type": "string",
+          "description": "Official license or ID number.",
+          "minLength": 3,
+          "maxLength": 60
+        },
+        "pickupGateAddress": {
+          "type": "string",
+          "description": "Exact pickup gate or loading dock address.",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "organizationName",
+        "accountRole",
+        "area",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "NGO": {
+      "title": "NGO",
+      "description": "Registered recipient NGO profile and capacity ledger.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "description": "UID of the NGO coordinator who owns this profile.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Organization name.",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "area": {
+          "type": "string",
+          "description": "Pune neighborhood.",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "maxMealCapacity": {
+          "type": "number",
+          "description": "Maximum daily meal intake capacity."
+        },
+        "currentLoadMeals": {
+          "type": "number",
+          "description": "Current reserved/active meal load."
+        },
+        "availableForPickup": {
+          "type": "boolean",
+          "description": "Whether the NGO is actively accepting pickups."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["network"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "name",
+        "area",
+        "maxMealCapacity",
+        "currentLoadMeals",
+        "availableForPickup",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Donation": {
+      "title": "Donation",
+      "description": "Surplus food donation batch with inventory quantities and separate expiry/pickup windows.",
+      "type": "object",
+      "properties": {
+        "donorUid": {
+          "type": "string",
+          "description": "UID of the donor who created the listing.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "organizationName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "foodName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Cooked Meals",
+            "Bakery & Bread",
+            "Fresh Produce",
+            "Packaged & Dry",
+            "Dairy & Beverages"
+          ],
+          "maxLength": 40
+        },
+        "originalQuantity": {
+          "type": "number"
+        },
+        "availableQuantity": {
+          "type": "number"
+        },
+        "reservedQuantity": {
+          "type": "number"
+        },
+        "collectedQuantity": {
+          "type": "number"
+        },
+        "storageCondition": {
+          "type": "string",
+          "enum": [
+            "Hot Insulated (60°C+)",
+            "Refrigerated (0–4°C)",
+            "Ambient / Room Temp",
+            "Frozen (-18°C)"
+          ],
+          "maxLength": 40
+        },
+        "locationArea": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "expiryTimeISO": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40
+        },
+        "pickupWindowStartISO": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40
+        },
+        "pickupWindowEndISO": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Listed",
+            "Matched",
+            "Reserved",
+            "Scheduled",
+            "In Progress",
+            "Collected",
+            "Completed",
+            "Expired"
+          ],
+          "maxLength": 24
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["network"],
+          "maxLength": 16
+        },
+        "donorVerificationStatus": {
+          "type": "string",
+          "enum": ["unverified", "pending_verification", "verified"],
+          "maxLength": 32
+        },
+        "donorOrganizationCategory": {
+          "type": "string",
+          "enum": ["Commercial", "Institutional", "Individual"],
+          "maxLength": 24
+        },
+        "donorDocumentType": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "donorContactPerson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "donorPhone": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 30
+        },
+        "donorEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "pickupGateAddress": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "donorUid",
+        "organizationName",
+        "foodName",
+        "category",
+        "originalQuantity",
+        "availableQuantity",
+        "reservedQuantity",
+        "collectedQuantity",
+        "storageCondition",
+        "locationArea",
+        "expiryTimeISO",
+        "pickupWindowStartISO",
+        "pickupWindowEndISO",
+        "status",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Reservation": {
+      "title": "Reservation",
+      "description": "Transactional meal reservation linking an NGO to a specific donation batch.",
+      "type": "object",
+      "properties": {
+        "donationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "donorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ngoUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ngoName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "mealsReserved": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Reserved", "Scheduled", "In Progress", "Collected", "Completed"],
+          "maxLength": 24
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "donationId",
+        "donorUid",
+        "ngoUid",
+        "ngoName",
+        "mealsReserved",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PickupSchedule": {
+      "title": "PickupSchedule",
+      "description": "Confirmed pickup slot within a donation collection window.",
+      "type": "object",
+      "properties": {
+        "donationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reservationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "donorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ngoUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "pickupTimeISO": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Scheduled", "In Progress", "Collected", "Completed"],
+          "maxLength": 24
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "donationId",
+        "reservationId",
+        "donorUid",
+        "ngoUid",
+        "pickupTimeISO",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Private user account profiles for Donors and NGOs (strictly owner-isolated)."
+    },
+    "/ngos/{ngoId}": {
+      "schema": { "$ref": "#/entities/NGO" },
+      "description": "Registered NGO directory and live meal capacity."
+    },
+    "/donations/{donationId}": {
+      "schema": { "$ref": "#/entities/Donation" },
+      "description": "Surplus food donations with transactional inventory counts."
+    },
+    "/reservations/{reservationId}": {
+      "schema": { "$ref": "#/entities/Reservation" },
+      "description": "NGO meal reservations against specific donations."
+    },
+    "/pickupSchedules/{scheduleId}": {
+      "schema": { "$ref": "#/entities/PickupSchedule" },
+      "description": "Scheduled pickup slots within permitted collection windows."
+    }
+  }
+}

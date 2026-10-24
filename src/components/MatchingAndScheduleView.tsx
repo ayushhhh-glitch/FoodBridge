@@ -13,12 +13,18 @@ import {
 } from 'lucide-react';
 import {
   type DonationStatus,
+  type DonorVerificationProfile,
   type FoodDonation,
   type NGOProfile,
   getExpiryMetrics,
   getRankedNgoMatches,
 } from '../utils/matchingEngine';
 import { PuneMap } from './PuneMap';
+import {
+  BatchDetailModal,
+  DonorVerifiedBadge,
+  TwoWayContactUnlockCard,
+} from './VerificationAndContactComponents';
 
 interface MatchingAndScheduleViewProps {
   donations: FoodDonation[];
@@ -26,6 +32,7 @@ interface MatchingAndScheduleViewProps {
   selectedDonationId: string;
   activeNgoId: string;
   role: 'donor' | 'ngo';
+  donorVerificationProfile?: DonorVerificationProfile | null;
   viewMode?: 'matching' | 'pickup-scheduling' | 'status-tracking';
   onSelectDonation: (id: string) => void;
   onSelectNgo: (ngoId: string) => void;
@@ -68,6 +75,7 @@ export const MatchingAndScheduleView: React.FC<MatchingAndScheduleViewProps> = (
   selectedDonationId,
   activeNgoId,
   role,
+  donorVerificationProfile,
   viewMode = 'matching',
   onSelectDonation,
   onSelectNgo,
@@ -80,6 +88,7 @@ export const MatchingAndScheduleView: React.FC<MatchingAndScheduleViewProps> = (
 
   const [reserveAmount, setReserveAmount] = useState<string>('50');
   const [pickupSlotLocal, setPickupSlotLocal] = useState<string>('');
+  const [detailModalDonation, setDetailModalDonation] = useState<FoodDonation | null>(null);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -291,11 +300,39 @@ export const MatchingAndScheduleView: React.FC<MatchingAndScheduleViewProps> = (
           </div>
           <div>
             <span className="text-slate-400 block">Assigned / Matched NGO</span>
-            <span className="font-semibold text-[#064E3B]">
-              {selectedDonation.matchedNgoName || 'Awaiting NGO Reservation'}
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-[#064E3B]">
+                {selectedDonation.matchedNgoName || 'Awaiting NGO Reservation'}
+              </span>
+              <DonorVerifiedBadge
+                status={
+                  selectedDonation.donorVerificationStatus ||
+                  donorVerificationProfile?.verificationStatus ||
+                  'verified'
+                }
+                category={
+                  selectedDonation.donorOrganizationCategory ||
+                  donorVerificationProfile?.organizationCategory
+                }
+                documentType={
+                  selectedDonation.donorDocumentType ||
+                  donorVerificationProfile?.documentType
+                }
+                compact
+              />
+            </div>
           </div>
         </div>
+
+        {/* Donor Contact Info & Two-Way Coordination for Selected Batch */}
+        <TwoWayContactUnlockCard
+          donation={selectedDonation}
+          ngos={ngos}
+          viewerRole={role}
+          activeNgoId={activeNgo.id}
+          donorVerificationProfile={donorVerificationProfile}
+          onOpenDetailModal={setDetailModalDonation}
+        />
       </div>
 
       {feedback && (
@@ -602,13 +639,15 @@ export const MatchingAndScheduleView: React.FC<MatchingAndScheduleViewProps> = (
             </form>
           </div>
 
-          {/* Interactive Map for Selected Batch */}
+          {/* Interactive Map for Selected Batch & Partner NGOs */}
           <PuneMap
             donations={donations}
             ngos={ngos}
             selectedDonationId={selectedDonation.id}
+            activeNgoId={activeNgo.id}
             onSelectDonation={onSelectDonation}
-            heightClass="h-[280px]"
+            onSelectNgo={onSelectNgo}
+            heightClass="h-[420px]"
           />
 
           {/* Audit History Log */}
@@ -640,6 +679,14 @@ export const MatchingAndScheduleView: React.FC<MatchingAndScheduleViewProps> = (
           </div>
         </div>
       </div>
+
+      <BatchDetailModal
+        donation={detailModalDonation}
+        ngos={ngos}
+        activeNgoId={activeNgo.id}
+        donorVerificationProfile={donorVerificationProfile}
+        onClose={() => setDetailModalDonation(null)}
+      />
     </div>
   );
 };

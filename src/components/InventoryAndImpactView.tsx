@@ -94,7 +94,7 @@ export const InventoryDashboardView: React.FC<InventoryViewProps> = ({
             Live Food Inventory Ledger
           </h2>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Real-time meal balance across all Pune donors tracking Original, Available, Reserved,
+            Real-time meal balance across all Delhi NCR donors tracking Original, Available, Reserved,
             and Collected quantities.
           </p>
         </div>
@@ -164,7 +164,7 @@ export const InventoryDashboardView: React.FC<InventoryViewProps> = ({
               onChange={(e) => setLocationFilter(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white"
             >
-              <option value="All">All Pune Locations</option>
+              <option value="All">All Delhi NCR Locations</option>
               {uniqueLocations.map((loc) => (
                 <option key={loc} value={loc}>
                   {loc}
@@ -379,7 +379,7 @@ export const ImpactDashboardView: React.FC<ImpactDashboardViewProps> = ({
             Community Impact & Sustainability Analytics
           </h2>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Live redistribution metrics computed from Pune donor batches and recipient NGO partners
+            Live redistribution metrics computed from Delhi NCR donor batches and recipient NGO partners
             (Demo Data).
           </p>
         </div>
@@ -426,7 +426,7 @@ export const ImpactDashboardView: React.FC<ImpactDashboardViewProps> = ({
             {summary.activeNgosCount}
           </div>
           <div className="text-xs text-slate-500 mt-1.5">
-            Pune Municipal Cluster (Demo)
+            Delhi NCR Cluster (Demo)
           </div>
         </div>
 
@@ -447,7 +447,7 @@ export const ImpactDashboardView: React.FC<ImpactDashboardViewProps> = ({
         <div className="bg-white p-6 rounded-xl border border-slate-200">
           <div className="mb-4">
             <h3 className="text-base font-bold text-slate-900 font-display">
-              Pune Monthly Meals Redistributed Trend (Demo Trajectory)
+              Delhi NCR Monthly Meals Redistributed Trend (Demo Trajectory)
             </h3>
             <p className="text-xs text-slate-500">
               Cumulative meals recovered across partner hostels, hotels, and corporate campuses
@@ -520,14 +520,14 @@ export const ImpactDashboardView: React.FC<ImpactDashboardViewProps> = ({
       {/* NGO Partner Capacity Table */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="text-base font-bold text-slate-900 font-display mb-4">
-          Registered Pune Recipient Organizations (Sample Demo Partners)
+          Registered Delhi NCR Recipient Organizations (Sample Demo Partners)
         </h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-slate-500">
                 <th className="py-3 px-4">Organization Name</th>
-                <th className="py-3 px-4">Pune Corridor</th>
+                <th className="py-3 px-4">Delhi NCR Corridor</th>
                 <th className="py-3 px-4">Supported Storage</th>
                 <th className="py-3 px-4 text-right">Current Load</th>
                 <th className="py-3 px-4 text-right">Max Capacity</th>

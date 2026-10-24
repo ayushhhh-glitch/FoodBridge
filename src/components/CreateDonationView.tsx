@@ -80,7 +80,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
   const [pickupEnd, setPickupEnd] = useState(
     toDateTimeLocalString(nowMs + 2.5 * hr)
   );
-  const [locationArea, setLocationArea] = useState('Kothrud, Pune');
+  const [locationArea, setLocationArea] = useState('Connaught Place, Central Delhi');
   const [address, setAddress] = useState('');
   const [storageCondition, setStorageCondition] = useState<StorageCondition>(
     'Hot Insulated (60°C+)'
@@ -104,20 +104,20 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
 
   const handlePrefillDemoSample = () => {
     const current = Date.now();
-    setDonorName('Dr. Sunita Deshmukh');
-    setOrganizationName('MIT World Peace University Hostel Mess');
+    setDonorName('Prof. Arvind Sharma');
+    setOrganizationName('Delhi University Central Hostel');
     setDonorType('Hostel / Canteen');
-    setFoodName('Freshly Prepared Masala Khichdi, Kadhi & Roasted Papad');
+    setFoodName('Freshly Prepared Rajma Chawal, Mix Veg & Roasted Papad');
     setCategory('Cooked Meals');
     setQuantityMeals('175');
     setPreparationTime(toDateTimeLocalString(current - 30 * min));
     setExpiryTime(toDateTimeLocalString(current + 3.5 * hr));
     setPickupStart(toDateTimeLocalString(current + 10 * min));
     setPickupEnd(toDateTimeLocalString(current + 2.2 * hr));
-    setLocationArea('Kothrud, Pune');
-    setAddress('Gate 1 Service Lane, Paud Road, Kothrud, Pune 411038');
+    setLocationArea('North Campus, Delhi');
+    setAddress('Gate 2 Mess Loading Bay, Chhatra Marg, University Enclave, Delhi 110007');
     setStorageCondition('Hot Insulated (60°C+)');
-    setNotes('Packed in 4 commercial stainless steel containers. Loading dock attendant available.');
+    setNotes('Packed in 4 commercial stainless steel containers. Loading dock attendant available at Gate 2.');
     setErrors({});
   };
 
@@ -152,7 +152,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
 
     setErrors({});
     const created = onCreateDonation(candidate as DonationFormInput);
-    setCreatedMsg(`Listed "${created.foodName}" (${created.originalQuantity} meals) and matched with Pune NGOs.`);
+    setCreatedMsg(`Listed "${created.foodName}" (${created.originalQuantity} meals) and matched with Delhi NCR NGOs.`);
     setTimeout(() => {
       onSuccessNavigate(created.id);
     }, 350);
@@ -175,7 +175,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
           className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-[#064E3B] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Fill Sample Pune Batch</span>
+          <span>Fill Sample Delhi NCR Batch</span>
         </button>
       </div>
 
@@ -250,7 +250,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
                 type="text"
                 value={organizationName}
                 onChange={(e) => setOrganizationName(e.target.value)}
-                placeholder="e.g., Symbiosis Hostel Mess / Banquet Hall"
+                placeholder="e.g., Delhi University Central Hostel / Banquet Hall"
                 className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-300 focus:border-[#10B981] focus:outline-none"
               />
               {errors.organizationName && (
@@ -477,7 +477,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
         {/* Section 3: Location & Optional Image Upload */}
         <div>
           <h3 className="text-sm font-bold text-slate-900 font-display mb-4 pb-2 border-b border-slate-100">
-            03. Pune Pickup Location & Packaging Photo
+            03. Delhi NCR Pickup Location & Packaging Photo
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
@@ -485,7 +485,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
                 htmlFor="location-area"
                 className="block text-xs font-semibold text-slate-700 mb-1.5"
               >
-                Pune Neighborhood / Sector *
+                Delhi NCR Neighborhood / Sector *
               </label>
               <select
                 id="location-area"
@@ -513,7 +513,7 @@ export const CreateDonationView: React.FC<CreateDonationViewProps> = ({
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="e.g., Gate 2 Service Dock, Paud Road, Pune"
+                placeholder="e.g., Gate 2 Service Dock, Chhatra Marg, Delhi 110007"
                 className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-300 focus:border-[#10B981] focus:outline-none"
               />
             </div>

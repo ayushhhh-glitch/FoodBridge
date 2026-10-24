@@ -1,0 +1,520 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 0. GLOBAL SAFETY NET (Default Deny)
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 1. GLOBAL PRIMITIVE HELPERS
+    // =========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasRegisteredRole(expectedRole) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountRole == expectedRole ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountRole in ['donor', 'ngo']
+        );
+    }
+
+    // =========================================================================
+    // 2. ENTITY VALIDATION BLUEPRINTS (Anti-Update-Gap)
+    // =========================================================================
+    function isValidUser(data) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'organizationName',
+          'accountRole',
+          'area',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'organizationName',
+          'accountRole',
+          'phone',
+          'area',
+          'organizationCategory',
+          'verificationStatus',
+          'documentType',
+          'documentNumber',
+          'pickupGateAddress',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == request.auth.uid &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 100 &&
+        data.organizationName is string && data.organizationName.size() >= 2 && data.organizationName.size() <= 140 &&
+        data.accountRole is string && data.accountRole.size() <= 16 &&
+        data.accountRole in ['donor', 'ngo'] &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30)) &&
+        (!('organizationCategory' in data) || (data.organizationCategory is string && data.organizationCategory.size() <= 24 && data.organizationCategory in ['Commercial', 'Institutional', 'Individual'])) &&
+        (!('verificationStatus' in data) || (data.verificationStatus is string && data.verificationStatus.size() <= 32 && data.verificationStatus in ['unverified', 'pending_verification', 'verified'])) &&
+        (!('documentType' in data) || (data.documentType is string && data.documentType.size() >= 2 && data.documentType.size() <= 80)) &&
+        (!('documentNumber' in data) || (data.documentNumber is string && data.documentNumber.size() >= 3 && data.documentNumber.size() <= 60)) &&
+        (!('pickupGateAddress' in data) || (data.pickupGateAddress is string && data.pickupGateAddress.size() >= 3 && data.pickupGateAddress.size() <= 200)) &&
+        data.area is string && data.area.size() >= 2 && data.area.size() <= 100 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidNgo(data) {
+      return data.keys().hasAll([
+          'ownerUid',
+          'name',
+          'area',
+          'maxMealCapacity',
+          'currentLoadMeals',
+          'availableForPickup',
+          'visibility',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid',
+          'name',
+          'area',
+          'maxMealCapacity',
+          'currentLoadMeals',
+          'availableForPickup',
+          'visibility',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        data.ownerUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
+        data.area is string && data.area.size() >= 2 && data.area.size() <= 100 &&
+        data.maxMealCapacity is int && data.maxMealCapacity >= 10 && data.maxMealCapacity <= 10000 &&
+        data.currentLoadMeals is int && data.currentLoadMeals >= 0 && data.currentLoadMeals <= data.maxMealCapacity &&
+        data.availableForPickup is bool &&
+        data.visibility is string && data.visibility.size() <= 16 && data.visibility == 'network' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDonation(data) {
+      return data.keys().hasAll([
+          'donorUid',
+          'organizationName',
+          'foodName',
+          'category',
+          'originalQuantity',
+          'availableQuantity',
+          'reservedQuantity',
+          'collectedQuantity',
+          'storageCondition',
+          'locationArea',
+          'expiryTimeISO',
+          'pickupWindowStartISO',
+          'pickupWindowEndISO',
+          'status',
+          'visibility',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'donorUid',
+          'organizationName',
+          'foodName',
+          'category',
+          'originalQuantity',
+          'availableQuantity',
+          'reservedQuantity',
+          'collectedQuantity',
+          'storageCondition',
+          'locationArea',
+          'expiryTimeISO',
+          'pickupWindowStartISO',
+          'pickupWindowEndISO',
+          'status',
+          'visibility',
+          'donorVerificationStatus',
+          'donorOrganizationCategory',
+          'donorDocumentType',
+          'donorContactPerson',
+          'donorPhone',
+          'donorEmail',
+          'pickupGateAddress',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.donorUid is string && data.donorUid.size() >= 1 && data.donorUid.size() <= 128 &&
+        data.donorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.organizationName is string && data.organizationName.size() >= 2 && data.organizationName.size() <= 140 &&
+        data.foodName is string && data.foodName.size() >= 3 && data.foodName.size() <= 200 &&
+        data.category is string && data.category.size() <= 40 &&
+        data.category in [
+          'Cooked Meals',
+          'Bakery & Bread',
+          'Fresh Produce',
+          'Packaged & Dry',
+          'Dairy & Beverages'
+        ] &&
+        data.originalQuantity is int && data.originalQuantity >= 5 && data.originalQuantity <= 5000 &&
+        data.availableQuantity is int && data.availableQuantity >= 0 && data.availableQuantity <= 5000 &&
+        data.reservedQuantity is int && data.reservedQuantity >= 0 && data.reservedQuantity <= 5000 &&
+        data.collectedQuantity is int && data.collectedQuantity >= 0 && data.collectedQuantity <= 5000 &&
+        (data.availableQuantity + data.reservedQuantity + data.collectedQuantity == data.originalQuantity) &&
+        data.storageCondition is string && data.storageCondition.size() <= 40 &&
+        data.storageCondition in [
+          'Hot Insulated (60°C+)',
+          'Refrigerated (0–4°C)',
+          'Ambient / Room Temp',
+          'Frozen (-18°C)'
+        ] &&
+        data.locationArea is string && data.locationArea.size() >= 2 && data.locationArea.size() <= 100 &&
+        data.expiryTimeISO is string && data.expiryTimeISO.size() >= 10 && data.expiryTimeISO.size() <= 40 &&
+        data.pickupWindowStartISO is string && data.pickupWindowStartISO.size() >= 10 && data.pickupWindowStartISO.size() <= 40 &&
+        data.pickupWindowEndISO is string && data.pickupWindowEndISO.size() >= 10 && data.pickupWindowEndISO.size() <= 40 &&
+        data.status is string && data.status.size() <= 24 &&
+        data.status in [
+          'Listed',
+          'Matched',
+          'Reserved',
+          'Scheduled',
+          'In Progress',
+          'Collected',
+          'Completed',
+          'Expired'
+        ] &&
+        (!('donorVerificationStatus' in data) || (data.donorVerificationStatus is string && data.donorVerificationStatus.size() <= 32 && data.donorVerificationStatus in ['unverified', 'pending_verification', 'verified'])) &&
+        (!('donorOrganizationCategory' in data) || (data.donorOrganizationCategory is string && data.donorOrganizationCategory.size() <= 24 && data.donorOrganizationCategory in ['Commercial', 'Institutional', 'Individual'])) &&
+        (!('donorDocumentType' in data) || (data.donorDocumentType is string && data.donorDocumentType.size() >= 2 && data.donorDocumentType.size() <= 80)) &&
+        (!('donorContactPerson' in data) || (data.donorContactPerson is string && data.donorContactPerson.size() >= 2 && data.donorContactPerson.size() <= 100)) &&
+        (!('donorPhone' in data) || (data.donorPhone is string && data.donorPhone.size() >= 5 && data.donorPhone.size() <= 30)) &&
+        (!('donorEmail' in data) || (data.donorEmail is string && data.donorEmail.size() >= 3 && data.donorEmail.size() <= 254)) &&
+        (!('pickupGateAddress' in data) || (data.pickupGateAddress is string && data.pickupGateAddress.size() >= 3 && data.pickupGateAddress.size() <= 200)) &&
+        data.visibility is string && data.visibility.size() <= 16 && data.visibility == 'network' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidReservation(data) {
+      return data.keys().hasAll([
+          'donationId',
+          'donorUid',
+          'ngoUid',
+          'ngoName',
+          'mealsReserved',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'donationId',
+          'donorUid',
+          'ngoUid',
+          'ngoName',
+          'mealsReserved',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.donationId is string && data.donationId.size() >= 1 && data.donationId.size() <= 128 &&
+        data.donationId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.donorUid is string && data.donorUid.size() >= 1 && data.donorUid.size() <= 128 &&
+        data.donorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ngoUid is string && data.ngoUid.size() >= 1 && data.ngoUid.size() <= 128 &&
+        data.ngoUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ngoName is string && data.ngoName.size() >= 2 && data.ngoName.size() <= 140 &&
+        data.mealsReserved is int && data.mealsReserved >= 1 && data.mealsReserved <= 5000 &&
+        data.status is string && data.status.size() <= 24 &&
+        data.status in ['Reserved', 'Scheduled', 'In Progress', 'Collected', 'Completed'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPickupSchedule(data) {
+      return data.keys().hasAll([
+          'donationId',
+          'reservationId',
+          'donorUid',
+          'ngoUid',
+          'pickupTimeISO',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'donationId',
+          'reservationId',
+          'donorUid',
+          'ngoUid',
+          'pickupTimeISO',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.donationId is string && data.donationId.size() >= 1 && data.donationId.size() <= 128 &&
+        data.donationId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.reservationId is string && data.reservationId.size() >= 1 && data.reservationId.size() <= 128 &&
+        data.reservationId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.donorUid is string && data.donorUid.size() >= 1 && data.donorUid.size() <= 128 &&
+        data.donorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ngoUid is string && data.ngoUid.size() >= 1 && data.ngoUid.size() <= 128 &&
+        data.ngoUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.pickupTimeISO is string && data.pickupTimeISO.size() >= 10 && data.pickupTimeISO.size() <= 40 &&
+        data.status is string && data.status.size() <= 24 &&
+        data.status in ['Scheduled', 'In Progress', 'Collected', 'Completed'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // 3. COLLECTION RULES
+    // =========================================================================
+
+    // /users/{userId} — Strict PII Owner Isolation (No list, no delete)
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().accountRole == existing().accountRole &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'organizationName',
+          'phone',
+          'area',
+          'organizationCategory',
+          'verificationStatus',
+          'documentType',
+          'documentNumber',
+          'pickupGateAddress',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // /ngos/{ngoId} — Registered Recipient Organizations
+    match /ngos/{ngoId} {
+      allow get: if isSignedIn() && isValidId(ngoId) && existing().visibility == 'network';
+      allow list: if isSignedIn() && existing().visibility == 'network';
+
+      allow create: if isSignedIn() &&
+        isValidId(ngoId) &&
+        isValidNgo(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasRegisteredRole('ngo');
+
+      allow update: if isSignedIn() &&
+        isValidId(ngoId) &&
+        isValidNgo(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            existing().ownerUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name',
+              'area',
+              'maxMealCapacity',
+              'currentLoadMeals',
+              'availableForPickup',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // /donations/{donationId} — Surplus Food Batches & Transactional Inventory
+    match /donations/{donationId} {
+      allow get: if isSignedIn() && isValidId(donationId) && (
+        existing().donorUid == request.auth.uid ||
+        existing().visibility == 'network'
+      );
+      allow list: if isSignedIn() && (
+        existing().donorUid == request.auth.uid ||
+        existing().visibility == 'network'
+      );
+
+      allow create: if isSignedIn() &&
+        isValidId(donationId) &&
+        isValidDonation(incoming()) &&
+        incoming().donorUid == request.auth.uid &&
+        incoming().availableQuantity == incoming().originalQuantity &&
+        incoming().reservedQuantity == 0 &&
+        incoming().collectedQuantity == 0 &&
+        incoming().status == 'Listed' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasRegisteredRole('donor');
+
+      allow update: if isSignedIn() &&
+        isValidId(donationId) &&
+        isValidDonation(incoming()) &&
+        !(existing().status in ['Completed', 'Expired']) &&
+        incoming().donorUid == existing().donorUid &&
+        incoming().originalQuantity == existing().originalQuantity &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Donor updating batch status, verification badge, or contact metadata
+          (
+            existing().donorUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'availableQuantity',
+              'reservedQuantity',
+              'collectedQuantity',
+              'status',
+              'donorVerificationStatus',
+              'donorOrganizationCategory',
+              'donorDocumentType',
+              'donorContactPerson',
+              'donorPhone',
+              'donorEmail',
+              'pickupGateAddress',
+              'updatedAt'
+            ])
+          ) ||
+          // Action 2: Registered NGO reserving or collecting meals via transaction
+          (
+            hasRegisteredRole('ngo') &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'availableQuantity',
+              'reservedQuantity',
+              'collectedQuantity',
+              'status',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // /reservations/{reservationId} — NGO Meal Reservations
+    match /reservations/{reservationId} {
+      allow get: if isSignedIn() && isValidId(reservationId) && (
+        existing().donorUid == request.auth.uid ||
+        existing().ngoUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        existing().donorUid == request.auth.uid ||
+        existing().ngoUid == request.auth.uid
+      );
+
+      allow create: if isSignedIn() &&
+        isValidId(reservationId) &&
+        isValidReservation(incoming()) &&
+        incoming().ngoUid == request.auth.uid &&
+        incoming().status == 'Reserved' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasRegisteredRole('ngo') &&
+        exists(/databases/$(database)/documents/donations/$(incoming().donationId));
+
+      allow update: if isSignedIn() &&
+        isValidId(reservationId) &&
+        isValidReservation(incoming()) &&
+        existing().status != 'Completed' &&
+        incoming().donationId == existing().donationId &&
+        incoming().donorUid == existing().donorUid &&
+        incoming().ngoUid == existing().ngoUid &&
+        incoming().mealsReserved == existing().mealsReserved &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            (existing().ngoUid == request.auth.uid || existing().donorUid == request.auth.uid) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // /pickupSchedules/{scheduleId} — Window-Validated Pickup Slots
+    match /pickupSchedules/{scheduleId} {
+      allow get: if isSignedIn() && isValidId(scheduleId) && (
+        existing().donorUid == request.auth.uid ||
+        existing().ngoUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        existing().donorUid == request.auth.uid ||
+        existing().ngoUid == request.auth.uid
+      );
+
+      allow create: if isSignedIn() &&
+        isValidId(scheduleId) &&
+        isValidPickupSchedule(incoming()) &&
+        incoming().ngoUid == request.auth.uid &&
+        incoming().status == 'Scheduled' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasRegisteredRole('ngo') &&
+        exists(/databases/$(database)/documents/donations/$(incoming().donationId)) &&
+        exists(/databases/$(database)/documents/reservations/$(incoming().reservationId));
+
+      allow update: if isSignedIn() &&
+        isValidId(scheduleId) &&
+        isValidPickupSchedule(incoming()) &&
+        existing().status != 'Completed' &&
+        incoming().donationId == existing().donationId &&
+        incoming().reservationId == existing().reservationId &&
+        incoming().donorUid == existing().donorUid &&
+        incoming().ngoUid == existing().ngoUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            (existing().ngoUid == request.auth.uid || existing().donorUid == request.auth.uid) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'pickupTimeISO',
+              'status',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+  }
+}

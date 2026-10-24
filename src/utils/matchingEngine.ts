@@ -25,6 +25,23 @@ export type ExpiryStatus = 'Available' | 'Expiring Soon' | 'Expired';
 export type UrgencyColor = 'green' | 'yellow' | 'red';
 export type InventoryBadge = 'Available' | 'Reserved' | 'Collected' | 'Expired';
 
+export type DonorOrganizationCategory = 'Commercial' | 'Institutional' | 'Individual';
+export type DonorVerificationStatus = 'unverified' | 'pending_verification' | 'verified';
+
+export interface DonorVerificationProfile {
+  organizationCategory: DonorOrganizationCategory;
+  documentType: string;
+  documentNumber: string;
+  documentFileName: string;
+  documentPreviewUrl: string;
+  verificationStatus: DonorVerificationStatus;
+  contactPerson: string;
+  contactPhone: string;
+  contactEmail: string;
+  pickupGateAddress: string;
+  updatedAtISO: string;
+}
+
 export interface NGOProfile {
   id: string;
   name: string;
@@ -40,6 +57,8 @@ export interface NGOProfile {
   operatingHoursEnd: number;   // 0-23
   contactPerson: string;
   phone: string;
+  email?: string;
+  pickupVehicleDetails?: string;
   availableForPickup: boolean;
   isDemoData: boolean;
   registrationLabel: string;
@@ -65,6 +84,7 @@ export interface StatusTimelineEvent {
 
 export interface FoodDonation {
   id: string;
+  donorUid?: string;
   donorName: string;
   organizationName: string;
   donorType: 'Restaurant' | 'Hostel / Canteen' | 'Event / Banquet' | 'Hotel' | 'Corporate Cafeteria';
@@ -89,6 +109,13 @@ export interface FoodDonation {
   scheduledPickupTimeISO?: string;
   imageUrl?: string;
   notes?: string;
+  donorPhone?: string;
+  donorEmail?: string;
+  pickupGateAddress?: string;
+  donorVerificationStatus?: DonorVerificationStatus;
+  donorOrganizationCategory?: DonorOrganizationCategory;
+  donorDocumentType?: string;
+  donorDocumentNumber?: string;
   isDemoData: boolean;
   reservations: ReservationRecord[];
   statusHistory: StatusTimelineEvent[];
@@ -131,20 +158,25 @@ export interface DonationFormInput {
   notes?: string;
 }
 
-export const PUNE_NEIGHBORHOOD_COORDS: Record<string, { lat: number; lng: number }> = {
-  'Kothrud, Pune': { lat: 18.5074, lng: 73.8077 },
-  'Shivajinagar, Pune': { lat: 18.5308, lng: 73.8475 },
-  'Koregaon Park, Pune': { lat: 18.5362, lng: 73.8940 },
-  'Viman Nagar, Pune': { lat: 18.5679, lng: 73.9143 },
-  'Hinjewadi Phase 1, Pune': { lat: 18.5913, lng: 73.7389 },
-  'Hadapsar, Pune': { lat: 18.5089, lng: 73.9259 },
-  'Baner, Pune': { lat: 18.5590, lng: 73.7868 },
-  'Deccan Gymkhana, Pune': { lat: 18.5167, lng: 73.8415 },
-  'Wakad, Pune': { lat: 18.5987, lng: 73.7644 },
-  'Balewadi, Pune': { lat: 18.5760, lng: 73.7707 },
-  'Aundh, Pune': { lat: 18.5580, lng: 73.8075 },
-  'Camp / MG Road, Pune': { lat: 18.5136, lng: 73.8789 },
+export const DELHI_NCR_NEIGHBORHOOD_COORDS: Record<string, { lat: number; lng: number }> = {
+  'Connaught Place, Central Delhi': { lat: 28.6304, lng: 77.2177 },
+  'North Campus, Delhi': { lat: 28.6892, lng: 77.2104 },
+  'Nehru Place, South Delhi': { lat: 28.5494, lng: 77.2533 },
+  'Hauz Khas / Green Park, South Delhi': { lat: 28.5494, lng: 77.2001 },
+  'Okhla Industrial Area, South Delhi': { lat: 28.5355, lng: 77.2732 },
+  'Rohini Sector 14, North Delhi': { lat: 28.7159, lng: 77.1197 },
+  'GT Karnal Road, North Delhi': { lat: 28.7300, lng: 77.1500 },
+  'Mayur Vihar Phase 1, East Delhi': { lat: 28.6080, lng: 77.2950 },
+  'Dwarka Sector 10, West Delhi': { lat: 28.5823, lng: 77.0500 },
+  'Lajpat Nagar, South Delhi': { lat: 28.5677, lng: 77.2433 },
+  'Saket, South Delhi': { lat: 28.5246, lng: 77.2066 },
+  'Laxmi Nagar, East Delhi': { lat: 28.6304, lng: 77.2773 },
+  'Noida Sector 62, NCR': { lat: 28.6279, lng: 77.3649 },
+  'Indirapuram, Ghaziabad NCR': { lat: 28.6415, lng: 77.3714 },
 };
+
+export const PUNE_NEIGHBORHOOD_COORDS = DELHI_NCR_NEIGHBORHOOD_COORDS;
+
 
 export function calculateHaversineDistanceKm(
   lat1: number,
@@ -419,7 +451,7 @@ export function validateDonationInput(
     errors.quantityMeals = 'Quantity must be between 5 and 5,000 meals.';
   }
   if (!input.locationArea || input.locationArea.trim().length === 0) {
-    errors.locationArea = 'Pickup neighborhood in Pune is required.';
+    errors.locationArea = 'Pickup neighborhood in Delhi NCR is required.';
   }
   if (!input.storageCondition) {
     errors.storageCondition = 'Select required food storage conditions.';
@@ -718,3 +750,528 @@ export function calculateImpactSummary(
     totalNgosCount: ngos.length,
   };
 }
+
+export interface FirestoreDonationDoc {
+  id: string;
+  donorUid: string;
+  organizationName: string;
+  foodName: string;
+  category: FoodCategory;
+  originalQuantity: number;
+  availableQuantity: number;
+  reservedQuantity: number;
+  collectedQuantity: number;
+  storageCondition: StorageCondition;
+  locationArea: string;
+  expiryTimeISO: string;
+  pickupWindowStartISO: string;
+  pickupWindowEndISO: string;
+  status: DonationStatus;
+  visibility: string;
+  donorVerificationStatus?: DonorVerificationStatus;
+  donorOrganizationCategory?: DonorOrganizationCategory;
+  donorDocumentType?: string;
+  donorContactPerson?: string;
+  donorPhone?: string;
+  donorEmail?: string;
+  pickupGateAddress?: string;
+  createdAtISO?: string;
+  updatedAtISO?: string;
+}
+
+export interface FirestoreReservationDoc {
+  id: string;
+  donationId: string;
+  donorUid: string;
+  ngoUid: string;
+  ngoName: string;
+  mealsReserved: number;
+  status: 'Reserved' | 'Scheduled' | 'In Progress' | 'Collected' | 'Completed';
+  createdAtISO?: string;
+  updatedAtISO?: string;
+}
+
+export interface FirestorePickupScheduleDoc {
+  id: string;
+  donationId: string;
+  reservationId: string;
+  donorUid: string;
+  ngoUid: string;
+  pickupTimeISO: string;
+  status: 'Scheduled' | 'In Progress' | 'Collected' | 'Completed';
+  createdAtISO?: string;
+  updatedAtISO?: string;
+}
+
+/**
+ * Pure hydration function that joins real-time Cloud Firestore snapshots from
+ * `donations`, `reservations`, and `pickupSchedules` into the rich FoodDonation UI model.
+ */
+export function hydrateDonationsFromFirestore(
+  rawDonations: FirestoreDonationDoc[],
+  rawReservations: FirestoreReservationDoc[],
+  rawSchedules: FirestorePickupScheduleDoc[],
+  ngos: NGOProfile[],
+  nowMs: number = Date.now(),
+  donorUserProfile?: {
+    uid?: string;
+    displayName?: string;
+    email?: string;
+    phone?: string;
+    organizationName?: string;
+    organizationCategory?: DonorOrganizationCategory;
+    verificationStatus?: DonorVerificationStatus;
+    documentType?: string;
+    documentNumber?: string;
+    pickupGateAddress?: string;
+  } | null
+): FoodDonation[] {
+  const sortedDonations = [...rawDonations].sort((a, b) => {
+    const tA = a.createdAtISO ? new Date(a.createdAtISO).getTime() : 0;
+    const tB = b.createdAtISO ? new Date(b.createdAtISO).getTime() : 0;
+    return tB - tA;
+  });
+
+  return sortedDonations.map((doc) => {
+    const coords = PUNE_NEIGHBORHOOD_COORDS[doc.locationArea] || {
+      lat: 28.6139,
+      lng: 77.209,
+    };
+
+    const matchingReservations = rawReservations
+      .filter((r) => r.donationId === doc.id)
+      .sort((a, b) => {
+        const tA = a.createdAtISO ? new Date(a.createdAtISO).getTime() : 0;
+        const tB = b.createdAtISO ? new Date(b.createdAtISO).getTime() : 0;
+        return tB - tA;
+      });
+
+    const matchingSchedules = rawSchedules
+      .filter((s) => s.donationId === doc.id)
+      .sort((a, b) => {
+        const tA = a.createdAtISO ? new Date(a.createdAtISO).getTime() : 0;
+        const tB = b.createdAtISO ? new Date(b.createdAtISO).getTime() : 0;
+        return tB - tA;
+      });
+
+    const latestSchedule = matchingSchedules[0];
+    const latestReservation = matchingReservations[0];
+
+    const hydratedReservations: ReservationRecord[] = matchingReservations.map((res) => {
+      const linkedSchedule = matchingSchedules.find(
+        (s) => s.reservationId === res.id || s.donationId === doc.id
+      );
+      return {
+        id: res.id,
+        ngoId: res.ngoUid,
+        ngoName: res.ngoName,
+        mealsReserved: res.mealsReserved,
+        status: res.status,
+        pickupTimeISO: linkedSchedule?.pickupTimeISO,
+        createdAtISO: res.createdAtISO || new Date(nowMs).toISOString(),
+      };
+    });
+
+    const createdISO = doc.createdAtISO || new Date(nowMs).toISOString();
+    const updatedISO = doc.updatedAtISO || createdISO;
+
+    const statusHistory: StatusTimelineEvent[] = [
+      {
+        status: 'Listed',
+        timestampISO: createdISO,
+        actor: doc.organizationName,
+        note: `Listed ${doc.originalQuantity} meals (${doc.category}) in Cloud Firestore.`,
+      },
+    ];
+
+    for (const res of [...matchingReservations].reverse()) {
+      statusHistory.push({
+        status: 'Reserved',
+        timestampISO: res.createdAtISO || updatedISO,
+        actor: res.ngoName,
+        note: `Reserved ${res.mealsReserved} meals via atomic Firestore transaction (${doc.availableQuantity} meals remaining).`,
+      });
+    }
+
+    for (const sched of [...matchingSchedules].reverse()) {
+      const ngoActor =
+        matchingReservations.find((r) => r.id === sched.reservationId)?.ngoName ||
+        latestReservation?.ngoName ||
+        'Recipient NGO Partner';
+      statusHistory.push({
+        status: 'Scheduled',
+        timestampISO: sched.createdAtISO || updatedISO,
+        actor: ngoActor,
+        note: `Confirmed pickup appointment for ${new Date(
+          sched.pickupTimeISO
+        ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`,
+      });
+    }
+
+    if (
+      doc.status === 'In Progress' ||
+      doc.status === 'Collected' ||
+      doc.status === 'Completed' ||
+      doc.status === 'Expired'
+    ) {
+      const actor = latestReservation?.ngoName || doc.organizationName;
+      const noteByStatus: Record<string, string> = {
+        'In Progress': 'Dispatch vehicle en route for food pickup.',
+        Collected: `Food batch collected (${doc.collectedQuantity} meals verified via Firestore transaction).`,
+        Completed: `Redistribution completed (${doc.collectedQuantity} meals served).`,
+        Expired: 'Batch reached expiry deadline and was locked.',
+      };
+      statusHistory.push({
+        status: doc.status,
+        timestampISO: updatedISO,
+        actor,
+        note: noteByStatus[doc.status] || `Status updated to ${doc.status}.`,
+      });
+    }
+
+    const isMatchingDonorProfile =
+      donorUserProfile && donorUserProfile.uid && donorUserProfile.uid === doc.donorUid;
+
+    const resolvedContactPerson =
+      doc.donorContactPerson ||
+      (isMatchingDonorProfile ? donorUserProfile?.displayName : undefined) ||
+      doc.organizationName;
+    const resolvedPhone =
+      doc.donorPhone ||
+      (isMatchingDonorProfile ? donorUserProfile?.phone : undefined) ||
+      '+91 98110 44210';
+    const resolvedEmail =
+      doc.donorEmail ||
+      (isMatchingDonorProfile ? donorUserProfile?.email : undefined) ||
+      'dispatch@foodbridge-delhi.org';
+    const resolvedGateAddress =
+      doc.pickupGateAddress ||
+      (isMatchingDonorProfile ? donorUserProfile?.pickupGateAddress : undefined) ||
+      `${doc.locationArea}, Main Gate Bay, Delhi NCR`;
+
+    const baseDonation: FoodDonation = {
+      id: doc.id,
+      donorUid: doc.donorUid,
+      donorName: resolvedContactPerson,
+      organizationName: doc.organizationName,
+      donorType: 'Hostel / Canteen',
+      foodName: doc.foodName,
+      category: doc.category,
+      originalQuantity: doc.originalQuantity,
+      availableQuantity: doc.availableQuantity,
+      reservedQuantity: doc.reservedQuantity,
+      collectedQuantity: doc.collectedQuantity,
+      preparationTimeISO: createdISO,
+      expiryTimeISO: doc.expiryTimeISO,
+      pickupWindowStartISO: doc.pickupWindowStartISO,
+      pickupWindowEndISO: doc.pickupWindowEndISO,
+      locationArea: doc.locationArea,
+      address: resolvedGateAddress,
+      lat: coords.lat,
+      lng: coords.lng,
+      storageCondition: doc.storageCondition,
+      status: doc.status,
+      scheduledPickupTimeISO: latestSchedule?.pickupTimeISO,
+      donorVerificationStatus:
+        doc.donorVerificationStatus ||
+        (isMatchingDonorProfile ? donorUserProfile?.verificationStatus : undefined) ||
+        'verified',
+      donorOrganizationCategory:
+        doc.donorOrganizationCategory ||
+        (isMatchingDonorProfile ? donorUserProfile?.organizationCategory : undefined) ||
+        'Commercial',
+      donorDocumentType:
+        doc.donorDocumentType ||
+        (isMatchingDonorProfile ? donorUserProfile?.documentType : undefined) ||
+        'FSSAI License Number / Certificate',
+      donorDocumentNumber:
+        (isMatchingDonorProfile ? donorUserProfile?.documentNumber : undefined) ||
+        'FSSAI-13324089001421',
+      donorPhone: resolvedPhone,
+      donorEmail: resolvedEmail,
+      pickupGateAddress: resolvedGateAddress,
+      isDemoData: false,
+      reservations: hydratedReservations,
+      statusHistory,
+    };
+
+    const matchedNgoFromCatalog = ngos.find(
+      (n) =>
+        n.id === latestReservation?.ngoUid ||
+        n.name.toLowerCase() === latestReservation?.ngoName?.toLowerCase()
+    );
+
+    if (latestReservation) {
+      baseDonation.matchedNgoId = matchedNgoFromCatalog?.id || latestReservation.ngoUid;
+      baseDonation.matchedNgoName = latestReservation.ngoName;
+    } else {
+      const topMatch = getRankedNgoMatches(baseDonation, ngos, nowMs).find(
+        (m) => m.eligible
+      );
+      if (topMatch) {
+        baseDonation.matchedNgoId = topMatch.ngo.id;
+        baseDonation.matchedNgoName = topMatch.ngo.name;
+      }
+    }
+
+    return baseDonation;
+  });
+}
+
+// ============================================================================
+// DONOR OFFICIAL DOCUMENT VERIFICATION & TWO-WAY CONTACT UNLOCK PURE LOGIC
+// ============================================================================
+
+export const REQUIRED_DOCUMENT_OPTIONS: Record<DonorOrganizationCategory, string[]> = {
+  Commercial: [
+    'FSSAI License Number / Certificate',
+    'Business Registration / GST Certificate',
+  ],
+  Institutional: [
+    'Authorized College / Hostel ID',
+    'Institutional Authority Letter',
+  ],
+  Individual: [
+    'Official Govt Photo ID (Driving License)',
+    'Official Govt Photo ID (Passport)',
+    'Official Govt Photo ID (Voter ID)',
+  ],
+};
+
+export function getRequiredDocumentsForCategory(
+  category: DonorOrganizationCategory
+): string[] {
+  return REQUIRED_DOCUMENT_OPTIONS[category] || REQUIRED_DOCUMENT_OPTIONS.Commercial;
+}
+
+export function validateDonorVerificationInput(input: {
+  organizationCategory: DonorOrganizationCategory;
+  documentType: string;
+  documentNumber: string;
+  contactPerson: string;
+  contactPhone: string;
+  contactEmail: string;
+  pickupGateAddress: string;
+}): { valid: boolean; error?: string } {
+  const allowedDocs = getRequiredDocumentsForCategory(input.organizationCategory);
+  if (!allowedDocs.includes(input.documentType)) {
+    return {
+      valid: false,
+      error: `Please select a valid required document for ${input.organizationCategory} donors.`,
+    };
+  }
+  if (!input.documentNumber || input.documentNumber.trim().length < 5) {
+    return {
+      valid: false,
+      error: 'Official license or document ID number must be at least 5 characters.',
+    };
+  }
+  if (!input.contactPerson || input.contactPerson.trim().length < 2) {
+    return {
+      valid: false,
+      error: 'Authorized contact person name is required.',
+    };
+  }
+  if (!input.contactPhone || input.contactPhone.trim().length < 8) {
+    return {
+      valid: false,
+      error: 'Valid direct contact phone number is required.',
+    };
+  }
+  if (!input.contactEmail || !input.contactEmail.includes('@')) {
+    return {
+      valid: false,
+      error: 'Valid official contact email is required.',
+    };
+  }
+  if (!input.pickupGateAddress || input.pickupGateAddress.trim().length < 5) {
+    return {
+      valid: false,
+      error: 'Exact pickup gate or loading dock address is required.',
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * Determines whether Two-Way Contact Details are unlocked for a given donation batch.
+ * Contacts remain strictly masked during 'Listed', 'Matched', or unreserved 'Expired' states,
+ * and immediately unlock once an NGO confirms a reservation ('Reserved', 'Scheduled', 'In Progress', 'Collected', 'Completed').
+ */
+export function isContactUnlockedForBatch(donation: FoodDonation): boolean {
+  const unlockedStatuses: DonationStatus[] = [
+    'Reserved',
+    'Scheduled',
+    'In Progress',
+    'Collected',
+    'Completed',
+  ];
+  if (unlockedStatuses.includes(donation.status)) {
+    return true;
+  }
+  return Array.isArray(donation.reservations) && donation.reservations.length > 0;
+}
+
+export function maskSensitiveValue(
+  value: string,
+  type: 'name' | 'phone' | 'email' | 'address' | 'vehicle'
+): string {
+  const clean = (value || '').trim();
+  if (!clean) return '••••••••';
+
+  if (type === 'phone') {
+    const last3 = clean.slice(-3);
+    return `+91 98••• ••${last3}`;
+  }
+  if (type === 'email') {
+    const [local, domain] = clean.split('@');
+    const firstChar = (local || 'c')[0];
+    return `${firstChar}••••@${domain || 'foodbridge.org'}`;
+  }
+  if (type === 'name') {
+    const parts = clean.split(' ').filter(Boolean);
+    return parts
+      .map((p) => (p.length <= 2 ? p : `${p[0]}${'•'.repeat(Math.min(5, p.length - 1))}`))
+      .join(' ');
+  }
+  if (type === 'vehicle') {
+    return 'DL-1L-••-•••• · Vehicle Details Locked Until Reservation';
+  }
+  // address / gate
+  return `Gate ••, ${clean.split(',').slice(-2).join(',').trim() || 'Delhi NCR'} (Exact Gate Locked)`;
+}
+
+export interface TwoWayContactView {
+  unlocked: boolean;
+  donorVerificationStatus: DonorVerificationStatus;
+  donorOrganizationCategory: DonorOrganizationCategory;
+  donorDocumentType: string;
+  donorDocumentNumber: string;
+  donorSideSeesNgo: {
+    ngoName: string;
+    coordinatorName: string;
+    contactNumber: string;
+    organizationEmail: string;
+    pickupVehicleDetails: string;
+    rawPhone: string;
+    whatsappUrl: string;
+  };
+  ngoSideSeesDonor: {
+    organizationName: string;
+    contactPerson: string;
+    phoneNumber: string;
+    email: string;
+    exactPickupGateAddress: string;
+    rawPhone: string;
+    whatsappUrl: string;
+  };
+}
+
+export function getTwoWayContactDetails(
+  donation: FoodDonation,
+  ngos: NGOProfile[],
+  activeNgoId?: string,
+  globalVerification?: DonorVerificationProfile | null
+): TwoWayContactView {
+  const unlocked = isContactUnlockedForBatch(donation);
+
+  // Resolve target NGO (matched NGO, latest reservation NGO, or active NGO)
+  const latestRes = donation.reservations?.[0];
+  const resolvedNgo =
+    ngos.find((n) => n.id === donation.matchedNgoId) ||
+    ngos.find((n) => n.id === latestRes?.ngoId) ||
+    ngos.find((n) => n.id === activeNgoId) ||
+    ngos[0];
+
+  const rawDonorPerson =
+    donation.donorName ||
+    globalVerification?.contactPerson ||
+    'Prof. Arvind Sharma';
+  const rawDonorPhone =
+    donation.donorPhone ||
+    globalVerification?.contactPhone ||
+    '+91 98110 44210';
+  const rawDonorEmail =
+    donation.donorEmail ||
+    globalVerification?.contactEmail ||
+    `${donation.organizationName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14)}@delhi-donor.org`;
+  const rawDonorGate =
+    donation.pickupGateAddress ||
+    donation.address ||
+    globalVerification?.pickupGateAddress ||
+    `${donation.locationArea}, Delhi NCR 110001`;
+
+  const rawNgoCoordinator = resolvedNgo?.contactPerson || 'Raghavendra Verma';
+  const rawNgoPhone = resolvedNgo?.phone || '+91 98112 52109';
+  const rawNgoEmail =
+    resolvedNgo?.email ||
+    `dispatch@${(resolvedNgo?.name || 'delhingo').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14)}.org`;
+  const rawNgoVehicle =
+    resolvedNgo?.pickupVehicleDetails ||
+    'DL-1L-EF-4821 · Insulated Tata Ace Food Van (Cold/Hot Box)';
+
+  const donorDigits = rawDonorPhone.replace(/[^0-9]/g, '');
+  const ngoDigits = rawNgoPhone.replace(/[^0-9]/g, '');
+
+  const verificationStatus: DonorVerificationStatus =
+    donation.donorVerificationStatus ||
+    globalVerification?.verificationStatus ||
+    'verified';
+  const organizationCategory: DonorOrganizationCategory =
+    donation.donorOrganizationCategory ||
+    globalVerification?.organizationCategory ||
+    (donation.donorType === 'Hostel / Canteen' ? 'Institutional' : 'Commercial');
+  const documentType =
+    donation.donorDocumentType ||
+    globalVerification?.documentType ||
+    (organizationCategory === 'Institutional'
+      ? 'Authorized College / Hostel ID'
+      : 'FSSAI License Number / Certificate');
+  const documentNumber =
+    donation.donorDocumentNumber ||
+    globalVerification?.documentNumber ||
+    'FSSAI-13324089001421';
+
+  return {
+    unlocked,
+    donorVerificationStatus: verificationStatus,
+    donorOrganizationCategory: organizationCategory,
+    donorDocumentType: documentType,
+    donorDocumentNumber: documentNumber,
+    donorSideSeesNgo: {
+      ngoName: resolvedNgo?.name || donation.matchedNgoName || 'Delhi NCR NGO Partner',
+      coordinatorName: unlocked
+        ? rawNgoCoordinator
+        : maskSensitiveValue(rawNgoCoordinator, 'name'),
+      contactNumber: unlocked
+        ? rawNgoPhone
+        : maskSensitiveValue(rawNgoPhone, 'phone'),
+      organizationEmail: unlocked
+        ? rawNgoEmail
+        : maskSensitiveValue(rawNgoEmail, 'email'),
+      pickupVehicleDetails: unlocked
+        ? rawNgoVehicle
+        : maskSensitiveValue(rawNgoVehicle, 'vehicle'),
+      rawPhone: unlocked ? rawNgoPhone : '',
+      whatsappUrl: unlocked
+        ? `https://wa.me/${ngoDigits}?text=${encodeURIComponent(
+            `Hello ${rawNgoCoordinator} (${resolvedNgo?.name}), coordinating pickup for "${donation.foodName}" (${donation.originalQuantity} meals) via FoodBridge.`
+          )}`
+        : '#',
+    },
+    // Donor Contact Details are ALWAYS completely visible and unmasked to NGOs across all views
+    ngoSideSeesDonor: {
+      organizationName: donation.organizationName,
+      contactPerson: rawDonorPerson,
+      phoneNumber: rawDonorPhone,
+      email: rawDonorEmail,
+      exactPickupGateAddress: rawDonorGate,
+      rawPhone: rawDonorPhone,
+      whatsappUrl: `https://wa.me/${donorDigits}?text=${encodeURIComponent(
+        `Hello ${rawDonorPerson} (${donation.organizationName}), our NGO team is coordinating collection for "${donation.foodName}" (${donation.availableQuantity || donation.originalQuantity} meals) at ${rawDonorGate} via FoodBridge.`
+      )}`,
+    },
+  };
+}
+
+

@@ -10,6 +10,11 @@ import {
   scheduleDonationPickup,
   advanceDonationStatus,
   calculateImpactSummary,
+  hydrateDonationsFromFirestore,
+  getRequiredDocumentsForCategory,
+  validateDonorVerificationInput,
+  isContactUnlockedForBatch,
+  getTwoWayContactDetails,
   type FoodDonation,
   type NGOProfile,
 } from './matchingEngine';
@@ -18,19 +23,19 @@ const BASE_NOW = new Date('2026-10-24T12:00:00.000Z').getTime();
 
 const sampleNgo: NGOProfile = {
   id: 'ngo-test-1',
-  name: 'Annapurna Seva Foundation',
-  area: 'Kothrud, Pune',
-  address: 'Paud Road, Kothrud, Pune',
-  lat: 18.5074,
-  lng: 73.8077,
-  maxMealCapacity: 300,
-  currentLoadMeals: 100,
+  name: 'Feeding India Delhi Hub',
+  area: 'Connaught Place, Central Delhi',
+  address: 'Block K, Outer Circle, Connaught Place, New Delhi 110001',
+  lat: 28.6304,
+  lng: 77.2177,
+  maxMealCapacity: 250,
+  currentLoadMeals: 50,
   acceptedCategories: ['Cooked Meals', 'Bakery & Bread'],
   supportedStorage: ['Hot Insulated (60°C+)', 'Ambient / Room Temp'],
   operatingHoursStart: 7,
   operatingHoursEnd: 22,
-  contactPerson: 'Meera Kulkarni',
-  phone: '+91 98220 11223',
+  contactPerson: 'Raghavendra Verma',
+  phone: '+91 98112 52109',
   availableForPickup: true,
   isDemoData: true,
   registrationLabel: 'Demo Partner — Sample Record',
@@ -38,10 +43,10 @@ const sampleNgo: NGOProfile = {
 
 const sampleDonation: FoodDonation = {
   id: 'don-test-1',
-  donorName: 'Rajesh Deshmukh',
-  organizationName: 'Kothrud Banquet Kitchen',
-  donorType: 'Event / Banquet',
-  foodName: 'Veg Pulao & Paneer Masala',
+  donorName: 'Prof. Arvind Sharma',
+  organizationName: 'Delhi University Central Hostel',
+  donorType: 'Hostel / Canteen',
+  foodName: 'North Indian Veg Thali & Dal Makhani',
   category: 'Cooked Meals',
   originalQuantity: 150,
   availableQuantity: 150,
@@ -51,10 +56,10 @@ const sampleDonation: FoodDonation = {
   expiryTimeISO: new Date(BASE_NOW + 180 * 60000).toISOString(), // +3 hours
   pickupWindowStartISO: new Date(BASE_NOW + 15 * 60000).toISOString(), // +15 mins
   pickupWindowEndISO: new Date(BASE_NOW + 120 * 60000).toISOString(), // +2 hours
-  locationArea: 'Kothrud, Pune',
-  address: 'Karve Road, Kothrud, Pune',
-  lat: 18.5085,
-  lng: 73.8120,
+  locationArea: 'Connaught Place, Central Delhi',
+  address: 'Outer Circle, Connaught Place, New Delhi 110001',
+  lat: 28.6315,
+  lng: 77.2190,
   storageCondition: 'Hot Insulated (60°C+)',
   status: 'Listed',
   isDemoData: true,
@@ -63,19 +68,19 @@ const sampleDonation: FoodDonation = {
     {
       status: 'Listed',
       timestampISO: new Date(BASE_NOW).toISOString(),
-      actor: 'Rajesh Deshmukh',
+      actor: 'Prof. Arvind Sharma',
       note: 'Initial listing',
     },
   ],
 };
 
-test('Haversine distance calculates realistic km distance in Pune', () => {
-  const distSameArea = calculateHaversineDistanceKm(18.5074, 73.8077, 18.5085, 73.8120);
+test('Haversine distance calculates realistic km distance in Delhi NCR', () => {
+  const distSameArea = calculateHaversineDistanceKm(28.6304, 77.2177, 28.6315, 77.2190);
   assert.ok(distSameArea >= 0 && distSameArea < 1.5);
 
-  // Kothrud to Viman Nagar (~13 km)
-  const distCrossCity = calculateHaversineDistanceKm(18.5074, 73.8077, 18.5679, 73.9143);
-  assert.ok(distCrossCity > 10 && distCrossCity < 16);
+  // Connaught Place to Okhla Industrial Area (~12 km)
+  const distCrossCity = calculateHaversineDistanceKm(28.6304, 77.2177, 28.5355, 77.2732);
+  assert.ok(distCrossCity > 9 && distCrossCity < 16);
 });
 
 test('Expiry metrics distinguishes Available, Expiring Soon, and Expired', () => {
@@ -191,3 +196,144 @@ test('Inventory reservation prevents overbooking and expired reservations, and t
   assert.equal(summary.totalMealsCollected, 90);
   assert.equal(summary.completedDonationsCount, 1);
 });
+
+test('hydrateDonationsFromFirestore joins donations, reservations, and pickupSchedules snapshots', () => {
+  const pickupISO = new Date(BASE_NOW + 45 * 60000).toISOString();
+  const hydrated = hydrateDonationsFromFirestore(
+    [
+      {
+        id: 'don_live_1',
+        donorUid: 'uid_donor_1',
+        organizationName: 'MIT Hostel Mess',
+        foodName: 'Masala Khichdi & Kadhi',
+        category: 'Cooked Meals',
+        originalQuantity: 120,
+        availableQuantity: 40,
+        reservedQuantity: 80,
+        collectedQuantity: 0,
+        storageCondition: 'Hot Insulated (60°C+)',
+        locationArea: 'Kothrud, Pune',
+        expiryTimeISO: new Date(BASE_NOW + 180 * 60000).toISOString(),
+        pickupWindowStartISO: new Date(BASE_NOW + 15 * 60000).toISOString(),
+        pickupWindowEndISO: new Date(BASE_NOW + 120 * 60000).toISOString(),
+        status: 'Scheduled',
+        visibility: 'network',
+        createdAtISO: new Date(BASE_NOW - 10 * 60000).toISOString(),
+        updatedAtISO: new Date(BASE_NOW).toISOString(),
+      },
+    ],
+    [
+      {
+        id: 'res_live_1',
+        donationId: 'don_live_1',
+        donorUid: 'uid_donor_1',
+        ngoUid: 'uid_ngo_1',
+        ngoName: 'Annapurna Seva Foundation',
+        mealsReserved: 80,
+        status: 'Scheduled',
+        createdAtISO: new Date(BASE_NOW - 5 * 60000).toISOString(),
+      },
+    ],
+    [
+      {
+        id: 'sched_live_1',
+        donationId: 'don_live_1',
+        reservationId: 'res_live_1',
+        donorUid: 'uid_donor_1',
+        ngoUid: 'uid_ngo_1',
+        pickupTimeISO: pickupISO,
+        status: 'Scheduled',
+        createdAtISO: new Date(BASE_NOW - 2 * 60000).toISOString(),
+      },
+    ],
+    [sampleNgo],
+    BASE_NOW
+  );
+
+  assert.equal(hydrated.length, 1);
+  assert.equal(hydrated[0].id, 'don_live_1');
+  assert.equal(hydrated[0].isDemoData, false);
+  assert.equal(hydrated[0].availableQuantity, 40);
+  assert.equal(hydrated[0].reservedQuantity, 80);
+  assert.equal(hydrated[0].matchedNgoName, 'Annapurna Seva Foundation');
+  assert.equal(hydrated[0].scheduledPickupTimeISO, pickupISO);
+  assert.equal(hydrated[0].reservations.length, 1);
+  assert.equal(hydrated[0].reservations[0].pickupTimeISO, pickupISO);
+  assert.ok(hydrated[0].statusHistory.length >= 3);
+});
+
+test('Donor Official Document Verification validates Commercial, Institutional, and Individual documents', () => {
+  const commercialDocs = getRequiredDocumentsForCategory('Commercial');
+  assert.ok(commercialDocs.includes('FSSAI License Number / Certificate'));
+
+  const institutionalDocs = getRequiredDocumentsForCategory('Institutional');
+  assert.ok(institutionalDocs.includes('Authorized College / Hostel ID'));
+
+  const individualDocs = getRequiredDocumentsForCategory('Individual');
+  assert.ok(individualDocs.includes('Official Govt Photo ID (Driving License)'));
+
+  const validCommercial = validateDonorVerificationInput({
+    organizationCategory: 'Commercial',
+    documentType: 'FSSAI License Number / Certificate',
+    documentNumber: 'FSSAI-21524089001421',
+    contactPerson: 'Rajesh Deshmukh',
+    contactPhone: '+91 98230 11401',
+    contactEmail: 'rajesh@kothrudbanquet.in',
+    pickupGateAddress: 'Gate 2 Loading Bay, Karve Road, Kothrud, Pune',
+  });
+  assert.equal(validCommercial.valid, true);
+
+  const invalidDocMismatch = validateDonorVerificationInput({
+    organizationCategory: 'Individual',
+    documentType: 'FSSAI License Number / Certificate', // mismatch for Individual
+    documentNumber: 'DL-123456',
+    contactPerson: 'Rajesh Deshmukh',
+    contactPhone: '+91 98230 11401',
+    contactEmail: 'rajesh@kothrudbanquet.in',
+    pickupGateAddress: 'Gate 2 Loading Bay, Karve Road, Kothrud, Pune',
+  });
+  assert.equal(invalidDocMismatch.valid, false);
+});
+
+test('Donor Contact Details are always completely visible to NGOs while NGO vehicle details unlock upon reservation', () => {
+  const listedBatchWithDonorFields: FoodDonation = {
+    ...sampleDonation,
+    donorPhone: '+91 98110 44210',
+    donorEmail: 'arvind.sharma@du-hostel.edu.in',
+    pickupGateAddress:
+      'Central Mess Block, Gate 2 Loading Bay, Chhatra Marg, North Campus, Delhi 110007',
+  };
+
+  // 1. Before Reservation ('Listed' status, 0 reservations): Donor details are 100% unmasked
+  assert.equal(isContactUnlockedForBatch(listedBatchWithDonorFields), false);
+  const initialContacts = getTwoWayContactDetails(listedBatchWithDonorFields, [sampleNgo]);
+  assert.equal(initialContacts.unlocked, false);
+  assert.equal(initialContacts.ngoSideSeesDonor.organizationName, 'Delhi University Central Hostel');
+  assert.equal(initialContacts.ngoSideSeesDonor.contactPerson, 'Prof. Arvind Sharma');
+  assert.equal(initialContacts.ngoSideSeesDonor.phoneNumber, '+91 98110 44210');
+  assert.equal(initialContacts.ngoSideSeesDonor.email, 'arvind.sharma@du-hostel.edu.in');
+  assert.ok(initialContacts.ngoSideSeesDonor.exactPickupGateAddress.includes('Gate 2 Loading Bay'));
+  assert.ok(initialContacts.ngoSideSeesDonor.whatsappUrl.startsWith('https://wa.me/919811044210'));
+
+  // NGO vehicle details seen by Donor remain masked until reservation
+  assert.ok(initialContacts.donorSideSeesNgo.coordinatorName.includes('•'));
+  assert.ok(initialContacts.donorSideSeesNgo.contactNumber.includes('•'));
+  assert.ok(initialContacts.donorSideSeesNgo.pickupVehicleDetails.includes('Locked'));
+
+  // 2. After Reservation ('Reserved' status): Both sides are completely unlocked
+  const reserveResult = reserveDonationQuantity(listedBatchWithDonorFields, sampleNgo, 75, BASE_NOW);
+  assert.equal(reserveResult.success, true);
+  const reservedBatch = reserveResult.updatedDonation!;
+
+  assert.equal(isContactUnlockedForBatch(reservedBatch), true);
+  const unlockedContacts = getTwoWayContactDetails(reservedBatch, [sampleNgo]);
+  assert.equal(unlockedContacts.unlocked, true);
+  assert.equal(unlockedContacts.ngoSideSeesDonor.contactPerson, 'Prof. Arvind Sharma');
+  assert.equal(unlockedContacts.ngoSideSeesDonor.phoneNumber, '+91 98110 44210');
+  assert.equal(unlockedContacts.donorSideSeesNgo.coordinatorName, 'Raghavendra Verma');
+  assert.equal(unlockedContacts.donorSideSeesNgo.contactNumber, '+91 98112 52109');
+  assert.ok(!unlockedContacts.donorSideSeesNgo.pickupVehicleDetails.includes('Locked'));
+});
+
+
+

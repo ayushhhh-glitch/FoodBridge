@@ -13,16 +13,26 @@ import {
 } from 'lucide-react';
 import {
   type DonationStatus,
+  type DonorVerificationProfile,
   type FoodDonation,
   type NGOProfile,
   calculateImpactSummary,
   getExpiryMetrics,
   getRankedNgoMatches,
 } from '../utils/matchingEngine';
+import {
+  BatchDetailModal,
+  DonorVerifiedBadge,
+  TwoWayContactUnlockCard,
+  VerificationComplianceModule,
+} from './VerificationAndContactComponents';
 
 interface DonorDashboardProps {
   donations: FoodDonation[];
   ngos: NGOProfile[];
+  donorVerificationProfile: DonorVerificationProfile;
+  onUpdateDonorVerification: (updated: DonorVerificationProfile) => void;
+  isDemoMode: boolean;
   onNavigateTab: (tab: string, donationId?: string) => void;
   onAdvanceStatus: (donationId: string, nextStatus: DonationStatus, actorName: string) => {
     success: boolean;
@@ -33,10 +43,14 @@ interface DonorDashboardProps {
 export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
   donations,
   ngos,
+  donorVerificationProfile,
+  onUpdateDonorVerification,
+  isDemoMode,
   onNavigateTab,
   onAdvanceStatus,
 }) => {
   const [tabFilter, setTabFilter] = useState<'active' | 'history'>('active');
+  const [detailModalDonation, setDetailModalDonation] = useState<FoodDonation | null>(null);
   const nowMs = Date.now();
   const summary = calculateImpactSummary(donations, ngos, nowMs);
 
@@ -67,12 +81,19 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
       {/* Header & Quick CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 font-display tracking-tight">
-            Donor Coordination Dashboard
-          </h2>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 font-display tracking-tight">
+              Donor Coordination Dashboard
+            </h2>
+            <DonorVerifiedBadge
+              status={donorVerificationProfile.verificationStatus}
+              category={donorVerificationProfile.organizationCategory}
+              documentType={donorVerificationProfile.documentType}
+            />
+          </div>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Manage surplus food listings, review NGO match scores, and monitor pickup collection
-            windows across Pune.
+            Manage surplus food listings, official compliance credentials, and two-way NGO pickup
+            coordination across Delhi NCR.
           </p>
         </div>
         <button
@@ -84,6 +105,14 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
           <span>Create Food Donation</span>
         </button>
       </div>
+
+      {/* Donor Official Document Verification & Compliance Module */}
+      <VerificationComplianceModule
+        verificationProfile={donorVerificationProfile}
+        onUpdateVerification={onUpdateDonorVerification}
+        isDemoMode={isDemoMode}
+        defaultExpanded={false}
+      />
 
       {/* KPI Summary Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -106,7 +135,7 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
             {summary.totalMealsReserved}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Meals locked by Pune NGOs
+            Meals locked by Delhi NCR NGOs
           </div>
         </div>
 
@@ -159,7 +188,7 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
         </div>
 
         <span className="text-xs text-slate-500">
-          All sample Pune records are labeled as Demo Data
+          All sample Delhi NCR records are labeled as Demo Data
         </span>
       </div>
 
@@ -186,6 +215,20 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
                     <span className="font-semibold text-slate-800">
                       {donation.organizationName}
                     </span>
+                    <DonorVerifiedBadge
+                      status={
+                        donation.donorVerificationStatus ||
+                        donorVerificationProfile.verificationStatus
+                      }
+                      category={
+                        donation.donorOrganizationCategory ||
+                        donorVerificationProfile.organizationCategory
+                      }
+                      documentType={
+                        donation.donorDocumentType || donorVerificationProfile.documentType
+                      }
+                      compact
+                    />
                     <span>·</span>
                     <span>{donation.locationArea}</span>
                     <span>·</span>
@@ -260,6 +303,15 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
                 </div>
               </div>
 
+              {/* Two-Way Contact Details Unlock Card (Donor Perspective) */}
+              <TwoWayContactUnlockCard
+                donation={donation}
+                ngos={ngos}
+                viewerRole="donor"
+                donorVerificationProfile={donorVerificationProfile}
+                onOpenDetailModal={setDetailModalDonation}
+              />
+
               {/* Bottom Action Bar */}
               <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="text-xs text-slate-600">
@@ -330,6 +382,14 @@ export const DonorDashboardView: React.FC<DonorDashboardProps> = ({
           );
         })}
       </div>
+
+      <BatchDetailModal
+        donation={detailModalDonation}
+        ngos={ngos}
+        donorVerificationProfile={donorVerificationProfile}
+        onClose={() => setDetailModalDonation(null)}
+        onNavigateToMatcher={(donId) => onNavigateTab('matching', donId)}
+      />
     </div>
   );
 };
@@ -338,6 +398,7 @@ interface NgoDashboardProps {
   donations: FoodDonation[];
   ngos: NGOProfile[];
   activeNgoId: string;
+  donorVerificationProfile?: DonorVerificationProfile | null;
   onSelectNgo: (ngoId: string) => void;
   onReserveMeals: (donationId: string, ngoId: string, meals: number) => {
     success: boolean;
@@ -358,6 +419,7 @@ export const NgoDashboardView: React.FC<NgoDashboardProps> = ({
   donations,
   ngos,
   activeNgoId,
+  donorVerificationProfile,
   onSelectNgo,
   onReserveMeals,
   onSchedulePickup,
@@ -367,6 +429,7 @@ export const NgoDashboardView: React.FC<NgoDashboardProps> = ({
   const activeNgo = ngos.find((n) => n.id === activeNgoId) || ngos[0];
   const [customReserveMap, setCustomReserveMap] = useState<Record<string, string>>({});
   const [rejectedIds, setRejectedIds] = useState<string[]>([]);
+  const [detailModalDonation, setDetailModalDonation] = useState<FoodDonation | null>(null);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
@@ -520,9 +583,34 @@ export const NgoDashboardView: React.FC<NgoDashboardProps> = ({
                     <span>·</span>
                     <span>{matchInfo.distanceKm} km from {activeNgo.area}</span>
                     <span>·</span>
-                    <span>{donation.organizationName}</span>
+                    <span className="font-semibold text-slate-800">
+                      {donation.organizationName}
+                    </span>
+                    <DonorVerifiedBadge
+                      status={
+                        donation.donorVerificationStatus ||
+                        donorVerificationProfile?.verificationStatus ||
+                        'verified'
+                      }
+                      category={
+                        donation.donorOrganizationCategory ||
+                        donorVerificationProfile?.organizationCategory
+                      }
+                      documentType={
+                        donation.donorDocumentType || donorVerificationProfile?.documentType
+                      }
+                      compact
+                    />
                     <span>·</span>
                     <span>{donation.storageCondition}</span>
+                    <span>·</span>
+                    {donation.isDemoData ? (
+                      <span className="text-slate-400">Demo Record</span>
+                    ) : (
+                      <span className="font-semibold text-[#10B981]">
+                        Live Firestore Batch
+                      </span>
+                    )}
                   </div>
 
                   <h4 className="text-base sm:text-lg font-bold text-slate-900 font-display">
@@ -571,6 +659,16 @@ export const NgoDashboardView: React.FC<NgoDashboardProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Two-Way Contact Details Unlock Card (NGO Perspective) */}
+              <TwoWayContactUnlockCard
+                donation={donation}
+                ngos={ngos}
+                viewerRole="ngo"
+                activeNgoId={activeNgo.id}
+                donorVerificationProfile={donorVerificationProfile}
+                onOpenDetailModal={setDetailModalDonation}
+              />
 
               {/* NGO Action Controls */}
               <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
@@ -675,6 +773,15 @@ export const NgoDashboardView: React.FC<NgoDashboardProps> = ({
           );
         })}
       </div>
+
+      <BatchDetailModal
+        donation={detailModalDonation}
+        ngos={ngos}
+        activeNgoId={activeNgo.id}
+        donorVerificationProfile={donorVerificationProfile}
+        onClose={() => setDetailModalDonation(null)}
+        onNavigateToMatcher={onInspectInMatcher}
+      />
     </div>
   );
 };
